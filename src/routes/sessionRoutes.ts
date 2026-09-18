@@ -1,6 +1,9 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import QRCode from 'qrcode';
+import { getRedisClient } from '../config.js';
 import { sessionManager } from '../manager/sessionManager.js';
+import { cleanMediaStorage } from '../utils/cleanup.js';
+import { getCachedWhatsAppVersion, getWhatsAppVersion } from '../utils/versionGuard.js';
 import type {
   ApiDeleteResponse,
   ApiInitResponse,
@@ -8,6 +11,7 @@ import type {
   ApiQrResponse,
   ApiSendMediaResponse,
   ApiSendResponse,
+  MediaCleanupResult,
   PairCodeBody,
   SendMediaBody,
   SendMessageBody,
@@ -477,5 +481,61 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
     return {
       events: sessionManager.getRecentEvents(),
     };
+  });
+
+  /**
+   * Trigger manual or administrative media storage retention cleanup.
+   * POST /api/media/cleanup
+   */
+  fastify.post<{
+    Body: { retentionHours?: number };
+    Reply: MediaCleanupResult;
+  }>('/media/cleanup', async (request, reply) => {
+    try {
+      const retentionHours = request.body?.retentionHours;
+      const result = await cleanMediaStorage(retentionHours);
+      return reply.status(200).send(result);
+    } catch (err: any) {
+      request.log.error({ err: err.message }, 'Failed to execute media cleanup');
+      return reply.status(500).send({
+        success: false,
+        deletedFilesCount: 0,
+        prunedDirsCount: 0,
+        freedBytes: 0,
+        freedBytesFormatted: '0 B',
+        retentionHours: 48,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
+  /**
+   * WhatsApp Web Protocol Version Check & Guard
+   * GET /api/system/version
+   */
+  fastify.get('/system/version', async (request, reply) => {
+    try {
+      const redis = await getRedisClient();
+      const versionInfo = await getWhatsAppVersion(redis);
+      return reply.status(200).send({
+        success: true,
+        protocolVersion: versionInfo.version.join('.'),
+        versionTuple: versionInfo.version,
+        isLatest: versionInfo.isLatest,
+        source: versionInfo.source,
+        fetchedAt: new Date(versionInfo.fetchedAt).toISOString(),
+      });
+    } catch (err: any) {
+      request.log.error({ err: err.message }, 'Failed to retrieve WhatsApp protocol version');
+      const cached = getCachedWhatsAppVersion();
+      return reply.status(200).send({
+        success: true,
+        protocolVersion: cached ? cached.version.join('.') : '2.3000.1015901307',
+        versionTuple: cached ? cached.version : [2, 3000, 1015901307],
+        isLatest: cached ? cached.isLatest : true,
+        source: 'fallback',
+        fetchedAt: new Date().toISOString(),
+      });
+    }
   });
 };

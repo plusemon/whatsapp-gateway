@@ -131,8 +131,17 @@
 
           <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 text-zinc-400">
             <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span>Media:</span>
-            <span id="media-status" class="text-emerald-400 font-medium">/media/ active</span>
+            <span>Protocol:</span>
+            <span id="wa-version-status" class="text-emerald-400 font-medium">v2.3000.x</span>
+          </div>
+
+          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 text-zinc-400">
+            <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
+            <span>Retention:</span>
+            <span id="media-status" class="text-zinc-200 font-medium">48h</span>
+            <button onclick="triggerMediaCleanup()" class="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition" title="Trigger media storage disk pruning">
+              Clean
+            </button>
           </div>
 
           <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 text-zinc-400 max-w-full sm:max-w-[260px]">
@@ -412,6 +421,7 @@
             <button onclick="setEventFilter('all')" class="event-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 text-white font-medium whitespace-nowrap cursor-pointer" data-filter="all">All</button>
             <button onclick="setEventFilter('inbound_message')" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer" data-filter="inbound_message">Inbound</button>
             <button onclick="setEventFilter('outbound_message')" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer" data-filter="outbound_message">Outbound</button>
+            <button onclick="setEventFilter('message_ack')" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer" data-filter="message_ack">ACKs</button>
             <button onclick="setEventFilter('webhook')" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer" data-filter="webhook">Webhooks</button>
             <button onclick="setEventFilter('session_event')" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer" data-filter="session_event">Socket</button>
           </div>
@@ -692,6 +702,8 @@
       const data = await safeFetchJson('/api/health');
       const redisStatus = document.getElementById('redis-status');
       const redisDot = document.getElementById('redis-dot');
+      const waVersionStatus = document.getElementById('wa-version-status');
+      const mediaStatus = document.getElementById('media-status');
 
       if (!data) {
         redisStatus.textContent = 'offline';
@@ -709,9 +721,41 @@
         redisDot.className = 'w-2 h-2 rounded-full bg-amber-400';
       }
 
+      if (waVersionStatus && data.protocolVersion) {
+        waVersionStatus.textContent = 'v' + data.protocolVersion;
+        if (data.isLatestProtocol === false) {
+          waVersionStatus.className = 'text-amber-400 font-medium';
+        } else {
+          waVersionStatus.className = 'text-emerald-400 font-medium';
+        }
+      }
+
+      if (mediaStatus && data.mediaRetentionHours) {
+        mediaStatus.textContent = data.mediaRetentionHours + 'h';
+      }
+
       if (data.webhookUrl) {
         currentWebhookUrl = data.webhookUrl;
         document.getElementById('webhook-target').textContent = data.webhookUrl;
+      }
+    }
+
+    async function triggerMediaCleanup() {
+      showToast('Running media retention cleanup...');
+      try {
+        const res = await fetch('/api/media/cleanup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+          showToast(`Cleanup complete: deleted ${data.deletedFilesCount} file(s), freed ${data.freedBytesFormatted}`);
+        } else {
+          showToast('Cleanup failed', 'error');
+        }
+      } catch (err) {
+        showToast('Cleanup request failed: ' + err.message, 'error');
       }
     }
 
@@ -1327,6 +1371,8 @@
         filtered = cachedEventsList.filter(e => e.type.includes('inbound'));
       } else if (currentEventFilter === 'outbound_message') {
         filtered = cachedEventsList.filter(e => e.type.includes('outbound'));
+      } else if (currentEventFilter === 'message_ack') {
+        filtered = cachedEventsList.filter(e => e.type === 'message_ack');
       } else if (currentEventFilter === 'webhook') {
         filtered = cachedEventsList.filter(e => e.type.includes('webhook'));
       } else if (currentEventFilter === 'session_event') {
@@ -1354,6 +1400,9 @@
         } else if (ev.type === 'outbound_message') {
           badgeColor = 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
           typeIcon = '📤';
+        } else if (ev.type === 'message_ack') {
+          badgeColor = 'bg-teal-500/15 text-teal-300 border-teal-500/30';
+          typeIcon = '📬';
         } else if (ev.type === 'webhook_dispatched') {
           badgeColor = 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30';
           typeIcon = '🔗';
@@ -1373,11 +1422,19 @@
         // Create brief summary
         let summary = '';
         if (ev.details) {
-          if (ev.details.text) summary = ev.details.text;
-          else if (ev.details.status) summary = `Status changed to ${ev.details.status}`;
-          else if (ev.details.mediaType) summary = `Media: ${ev.details.mediaType}`;
-          else if (ev.details.message) summary = ev.details.message;
-          else summary = JSON.stringify(ev.details).substring(0, 60);
+          if (ev.type === 'message_ack') {
+            summary = `ACK: ${ev.details.statusLabel || 'Status ' + ev.details.status} (${ev.details.remoteJid || 'Target'}) · Msg: ${ev.details.messageId || 'N/A'}`;
+          } else if (ev.details.text) {
+            summary = ev.details.text;
+          } else if (ev.details.status) {
+            summary = `Status changed to ${ev.details.status}`;
+          } else if (ev.details.mediaType) {
+            summary = `Media: ${ev.details.mediaType}`;
+          } else if (ev.details.message) {
+            summary = ev.details.message;
+          } else {
+            summary = JSON.stringify(ev.details).substring(0, 60);
+          }
         }
 
         return `

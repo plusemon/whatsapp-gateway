@@ -13,6 +13,8 @@ import {
 } from './config.js';
 import { sessionManager } from './manager/sessionManager.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
+import { startMediaCleanupWorker, stopMediaCleanupWorker } from './utils/cleanup.js';
+import { getCachedWhatsAppVersion, getWhatsAppVersion } from './utils/versionGuard.js';
 
 /**
  * Builds and starts the Fastify WhatsApp Gateway Microservice.
@@ -44,6 +46,7 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   // Health check endpoints
   fastify.get('/api/health', async () => {
+    const cachedVersion = getCachedWhatsAppVersion();
     return {
       status: 'ok',
       service: 'botla-whatsapp-gateway',
@@ -54,6 +57,10 @@ export async function buildServer(): Promise<FastifyInstance> {
       redis: isUsingMockRedis() ? 'in-memory-fallback' : 'connected-redis',
       webhookUrl: config.botlaWebhookUrl,
       activeSessions: sessionManager.listSessions().length,
+      protocolVersion: cachedVersion ? cachedVersion.version.join('.') : 'synced-on-demand',
+      isLatestProtocol: cachedVersion ? cachedVersion.isLatest : true,
+      mediaRetentionHours: config.mediaRetentionHours,
+      mediaCleanupIntervalHours: config.mediaCleanupIntervalHours,
     };
   });
 
@@ -129,7 +136,15 @@ function getDashboardHtml(): string {
 export async function start() {
   try {
     // Pre-connect Redis
-    await getRedisClient();
+    const redis = await getRedisClient();
+
+    // Pre-warm WhatsApp Web protocol version cache in the background
+    getWhatsAppVersion(redis).catch((versionErr: any) => {
+      logger.warn({ err: versionErr.message }, '[Server] Initial protocol version check warning');
+    });
+
+    // Start background media storage auto-cleanup worker
+    startMediaCleanupWorker(config.mediaCleanupIntervalHours, config.mediaRetentionHours);
 
     const server = await buildServer();
     await server.listen({
@@ -166,6 +181,9 @@ export async function start() {
       forceExitTimer.unref();
 
       try {
+        // 0. Stop background media cleanup worker
+        stopMediaCleanupWorker();
+
         // 1. Close active Baileys sockets without purging Redis keys
         await sessionManager.closeAllSessions();
 

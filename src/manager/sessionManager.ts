@@ -10,18 +10,27 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import { clearRedisSession, useRedisAuthState } from '../auth/redisAuthState.js';
 import { config, getPublicBaseUrl, getRedisClient, logger } from '../config.js';
+import { getWhatsAppVersion } from '../utils/versionGuard.js';
 import type {
   InboundMediaMetadata,
   SessionMetadata,
   SessionStatus,
   SessionSummary,
+  WebhookAckPayload,
   WebhookInboundPayload,
+  WebhookPayload,
 } from '../types/index.js';
 
 export interface RecentEvent {
   id: string;
   timestamp: number;
-  type: 'inbound_message' | 'outbound_message' | 'webhook_dispatched' | 'webhook_failed' | 'session_event';
+  type:
+    | 'inbound_message'
+    | 'outbound_message'
+    | 'message_ack'
+    | 'webhook_dispatched'
+    | 'webhook_failed'
+    | 'session_event';
   sessionId: string;
   details: Record<string, any>;
 }
@@ -106,15 +115,17 @@ export class SessionManager {
     this.logEvent('session_event', sessionId, { action: 'init_started' });
 
     try {
-      // Step A: Initialize Custom Redis Auth State
+      // Step A: Initialize Custom Redis Auth State & Resolve WhatsApp Web Protocol Version
       const { state, saveCreds } = await useRedisAuthState(redis, sessionId);
+      const { version } = await getWhatsAppVersion(redis);
 
       // Create pino sublogger for Baileys with minimal noise
       const baileysLogger = logger.child({ module: 'baileys', sessionId });
       baileysLogger.level = 'warn';
 
-      // Step B: Create WASocket instance
+      // Step B: Create WASocket instance with synchronized protocol version
       const sock = makeWASocket({
+        version,
         auth: state,
         logger: baileysLogger,
         printQRInTerminal: false,
@@ -395,11 +406,90 @@ export class SessionManager {
         }
       });
 
+      // Step F: Listen for message delivery & read receipts (ACK updates) & relay to Botla webhook
+      sock.ev.on('messages.update', async (updates) => {
+        for (const item of updates) {
+          const status = item.update?.status;
+
+          // Process status change updates:
+          // status: 2 -> Server Ack (Sent)
+          // status: 3 -> Delivery Ack (Delivered)
+          // status: 4 -> Read / Seen Ack
+          // status: 0 -> Error / Delivery Failed
+          if (status !== undefined && status !== null) {
+            const messageId = item.key?.id || '';
+            const remoteJid = item.key?.remoteJid || '';
+
+            const ackPayload: WebhookAckPayload = {
+              sessionId,
+              event: 'message.ack',
+              data: {
+                messageId,
+                remoteJid,
+                status,
+              },
+            };
+
+            const statusLabel = this.getAckStatusLabel(status);
+
+            logger.info(
+              {
+                sessionId,
+                messageId,
+                remoteJid,
+                status,
+                statusLabel,
+                fromMe: item.key?.fromMe,
+              },
+              '[SessionManager] Received message status update (ACK)'
+            );
+
+            this.logEvent('message_ack', sessionId, {
+              messageId,
+              remoteJid,
+              status,
+              statusLabel,
+              fromMe: item.key?.fromMe,
+            });
+
+            // Dispatch ACK asynchronously to Botla Core webhook
+            this.dispatchWebhook(ackPayload).catch((webhookErr) => {
+              logger.error(
+                { sessionId, messageId, status, err: webhookErr.message },
+                '[SessionManager] Failed to dispatch ACK update to webhook'
+              );
+            });
+          }
+        }
+      });
+
       return meta;
     } catch (err: any) {
       meta.status = 'disconnected';
       logger.error({ sessionId, err: err.message }, '[SessionManager] Failed to initialize session');
       throw err;
+    }
+  }
+
+  /**
+   * Helper to convert numeric Baileys ACK status codes to human-readable labels.
+   */
+  public getAckStatusLabel(status: number): string {
+    switch (status) {
+      case 0:
+        return 'ERROR (Failed)';
+      case 1:
+        return 'PENDING';
+      case 2:
+        return 'SERVER_ACK (Sent)';
+      case 3:
+        return 'DELIVERY_ACK (Delivered)';
+      case 4:
+        return 'READ (Seen)';
+      case 5:
+        return 'PLAYED (Voice Note)';
+      default:
+        return `STATUS_${status}`;
     }
   }
 
@@ -530,16 +620,17 @@ export class SessionManager {
   }
 
   /**
-   * Asynchronously posts an inbound WhatsApp message payload to Botla's Laravel webhook.
+   * Asynchronously posts an inbound message or ACK status payload to Botla's Laravel webhook.
    * Signs the payload using HMAC-SHA256 if WEBHOOK_SECRET is set.
    */
-  public async dispatchWebhook(payload: WebhookInboundPayload): Promise<void> {
+  public async dispatchWebhook(payload: WebhookPayload | Record<string, any>): Promise<void> {
     const webhookUrl = config.botlaWebhookUrl;
     if (!webhookUrl) {
       logger.warn('[Webhook] No BOTLA_WEBHOOK_URL configured; skipping dispatch');
       return;
     }
 
+    const eventName = (payload as any).event || 'inbound_message';
     const bodyString = JSON.stringify(payload);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -568,20 +659,32 @@ export class SessionManager {
       }
 
       logger.info(
-        { sessionId: payload.sessionId, url: webhookUrl, status: response.status },
-        '[Webhook] Dispatched inbound message to Laravel webhook'
+        {
+          sessionId: payload.sessionId,
+          event: eventName,
+          url: webhookUrl,
+          status: response.status,
+        },
+        '[Webhook] Dispatched payload to Laravel webhook'
       );
       this.logEvent('webhook_dispatched', payload.sessionId, {
         url: webhookUrl,
+        event: eventName,
         statusCode: response.status,
       });
     } catch (err: any) {
       logger.error(
-        { sessionId: payload.sessionId, url: webhookUrl, error: err.message },
+        {
+          sessionId: payload.sessionId,
+          event: eventName,
+          url: webhookUrl,
+          error: err.message,
+        },
         '[Webhook] Failed to deliver payload to webhook'
       );
       this.logEvent('webhook_failed', payload.sessionId, {
         url: webhookUrl,
+        event: eventName,
         error: err.message,
       });
     }

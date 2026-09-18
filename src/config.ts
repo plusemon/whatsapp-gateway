@@ -15,6 +15,8 @@ export interface GatewayConfig {
   botlaWebhookUrl: string;
   webhookSecret: string;
   logLevel: string;
+  mediaRetentionHours: number;
+  mediaCleanupIntervalHours: number;
 }
 
 export const config: GatewayConfig = {
@@ -25,6 +27,8 @@ export const config: GatewayConfig = {
   botlaWebhookUrl: process.env.BOTLA_WEBHOOK_URL || 'http://127.0.0.1:8000/api/whatsapp/webhook',
   webhookSecret: process.env.WEBHOOK_SECRET || 'your_hmac_secret_here',
   logLevel: process.env.LOG_LEVEL || 'info',
+  mediaRetentionHours: parseInt(process.env.MEDIA_RETENTION_HOURS || '48', 10),
+  mediaCleanupIntervalHours: parseInt(process.env.MEDIA_CLEANUP_INTERVAL_HOURS || '6', 10),
 };
 
 /**

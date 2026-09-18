@@ -71,6 +71,37 @@ export interface WebhookInboundPayload {
 }
 
 /**
+ * Payload dispatched to the Botla Laravel webhook on message status ACK updates.
+ */
+export interface WebhookAckPayload {
+  sessionId: string;
+  event: 'message.ack';
+  data: {
+    messageId: string;
+    remoteJid: string;
+    status: number;
+  };
+}
+
+/**
+ * Combined webhook payloads supported by the gateway.
+ */
+export type WebhookPayload = WebhookInboundPayload | WebhookAckPayload;
+
+/**
+ * Result of an automated or manual media storage cleanup run.
+ */
+export interface MediaCleanupResult {
+  success: boolean;
+  deletedFilesCount: number;
+  prunedDirsCount: number;
+  freedBytes: number;
+  freedBytesFormatted: string;
+  retentionHours: number;
+  timestamp: string;
+}
+
+/**
  * Request payload for sending outbound messages.
  */
 export interface SendMessageBody {
