@@ -985,6 +985,22 @@
           qrPollInterval = null;
         }
         loadSessions();
+      } else if (data.status === 'qr_expired') {
+        img.classList.add('hidden');
+        placeholder.classList.remove('hidden');
+        placeholder.innerHTML = `
+          <div class="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mb-1">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          </div>
+          <span class="text-amber-400 font-semibold text-sm">QR Code Expired</span>
+          <span class="text-zinc-400 text-xs text-center max-w-xs mb-3">QR pairing timed out without being scanned.</span>
+          <button onclick="refreshQrSession('${activeQrSession}')" class="px-4 py-2 rounded-xl bg-white hover:bg-zinc-200 text-black text-xs font-semibold transition active:scale-95 flex items-center gap-1.5 shadow-sm">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            <span>Generate New QR</span>
+          </button>
+        `;
+        badge.textContent = 'QR Expired';
+        badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30';
       } else if (data.qrDataUrl) {
         img.src = data.qrDataUrl;
         img.classList.remove('hidden');
@@ -1002,6 +1018,27 @@
         badge.textContent = data.status || 'Waiting';
         badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-400';
       }
+    }
+
+    async function refreshQrSession(sessionId) {
+      showToast('Generating fresh QR code...');
+      const placeholder = document.getElementById('qr-placeholder');
+      const img = document.getElementById('qr-image');
+      if (img) img.classList.add('hidden');
+      if (placeholder) {
+        placeholder.classList.remove('hidden');
+        placeholder.innerHTML = `
+          <svg class="w-7 h-7 text-emerald-400 animate-spin mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          <span class="text-zinc-300 font-medium">Booting fresh session...</span>
+          <span class="text-zinc-500 text-[11px]">Connecting Baileys engine</span>
+        `;
+      }
+      await safeFetchJson('/api/sessions/' + encodeURIComponent(sessionId) + '/init', { method: 'POST' });
+      await fetchAndDisplayQr();
+      if (!qrPollInterval) {
+        qrPollInterval = setInterval(fetchAndDisplayQr, 3000);
+      }
+      loadSessions();
     }
 
     async function requestPairingCode() {

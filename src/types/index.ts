@@ -8,6 +8,7 @@ export type SessionStatus =
   | 'connecting'
   | 'connected'
   | 'qr_ready'
+  | 'qr_expired'
   | 'disconnected'
   | 'logged_out';
 

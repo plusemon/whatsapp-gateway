@@ -79,6 +79,16 @@ export class SessionManager {
       return existingMeta;
     }
 
+    // Terminate any previous socket reference if re-initializing from qr_ready, qr_expired or disconnected
+    if (existingSocket) {
+      try {
+        existingSocket.end(undefined);
+      } catch {
+        // Ignore termination error
+      }
+      this.activeSockets.delete(sessionId);
+    }
+
     const redis = await getRedisClient();
 
     // Prepare metadata record
@@ -182,9 +192,40 @@ export class SessionManager {
         if (connection === 'close') {
           const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
           const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+          const errorMessage = lastDisconnect?.error?.message || '';
+          const isQrExpired =
+            errorMessage.includes('QR refs attempts ended') ||
+            (!meta.user && (statusCode === DisconnectReason.timedOut || statusCode === 408) && (meta.status === 'qr_ready' || meta.status === 'connecting'));
+          const isRestartRequired = statusCode === DisconnectReason.restartRequired;
+
+          // QR code references timed out without being scanned
+          if (isQrExpired) {
+            meta.status = 'qr_expired';
+            meta.qr = null;
+            meta.qrUpdatedAt = null;
+            meta.reconnectAttempts = 0;
+            this.activeSockets.delete(sessionId);
+
+            try {
+              await redis.del(`wa:session:${sessionId}:qr`);
+            } catch {
+              // Ignore
+            }
+
+            logger.info(
+              { sessionId, statusCode },
+              '[SessionManager] QR code pairing expired (no scan received before timeout). Ready for re-init.'
+            );
+
+            this.logEvent('session_event', sessionId, {
+              action: 'qr_expired',
+              statusCode,
+            });
+            return;
+          }
 
           logger.warn(
-            { sessionId, statusCode, isLoggedOut, error: lastDisconnect?.error?.message },
+            { sessionId, statusCode, isLoggedOut, error: errorMessage },
             '[SessionManager] WhatsApp connection closed'
           );
 
@@ -193,6 +234,7 @@ export class SessionManager {
             meta.status = 'logged_out';
             meta.qr = null;
             meta.user = null;
+            meta.reconnectAttempts = 0;
             this.activeSockets.delete(sessionId);
 
             try {
@@ -206,6 +248,15 @@ export class SessionManager {
               action: 'logged_out',
               statusCode,
             });
+          } else if (isRestartRequired) {
+            // Immediate restart required by Baileys internal state sync
+            logger.info({ sessionId }, '[SessionManager] Restart required by Baileys, reconnecting immediately');
+            this.activeSockets.delete(sessionId);
+            setTimeout(() => {
+              this.initSession(sessionId).catch((reconnErr) => {
+                logger.error({ sessionId, err: reconnErr.message }, '[SessionManager] Restart reconnection failed');
+              });
+            }, 500);
           } else {
             // Unexpected disconnection: mark disconnected and attempt automatic reconnection
             meta.status = 'disconnected';

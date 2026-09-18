@@ -138,16 +138,21 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
         }
       }
 
+      let message = 'Waiting for QR generation or device connection...';
+      if (meta?.status === 'connected') {
+        message = 'Device is already authenticated & connected';
+      } else if (meta?.status === 'qr_expired') {
+        message = 'QR code pairing timed out without being scanned. Re-initialize session to generate a new QR code.';
+      } else if (rawQr) {
+        message = 'Scan this QR code with WhatsApp';
+      }
+
       return reply.status(200).send({
         sessionId: id,
         qr: rawQr,
         status: meta?.status || (rawQr ? 'qr_ready' : 'idle'),
         qrDataUrl,
-        message: meta?.status === 'connected'
-          ? 'Device is already authenticated & connected'
-          : rawQr
-          ? 'Scan this QR code with WhatsApp'
-          : 'Waiting for QR generation or device connection...',
+        message,
       });
     }
   );
