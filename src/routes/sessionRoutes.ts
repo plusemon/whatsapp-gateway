@@ -397,8 +397,32 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
 
   /**
    * 4. DELETE /api/sessions/:id
+   * 4b. POST /api/sessions/:id/purge (Fallback)
    * Disconnects socket and purges tenant session state from Redis.
    */
+  const handlePurgeSession = async (
+    request: { params: SessionParams; log: any },
+    reply: any
+  ) => {
+    const { id } = request.params;
+
+    try {
+      await sessionManager.deleteSession(id);
+      return reply.status(200).send({
+        success: true,
+        sessionId: id,
+        message: 'Session purged successfully',
+      });
+    } catch (err: any) {
+      request.log.error({ sessionId: id, err: err.message }, 'Failed to purge session');
+      return reply.status(500).send({
+        success: false,
+        sessionId: id,
+        message: `Error purging session '${id}': ${err.message}`,
+      });
+    }
+  };
+
   fastify.delete<{ Params: SessionParams; Reply: ApiDeleteResponse }>(
     '/sessions/:id',
     {
@@ -422,25 +446,33 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
         },
       },
     },
-    async (request, reply) => {
-      const { id } = request.params;
+    handlePurgeSession
+  );
 
-      try {
-        await sessionManager.deleteSession(id);
-        return reply.status(200).send({
-          success: true,
-          sessionId: id,
-          message: `Session '${id}' disconnected and purged from Redis and memory.`,
-        });
-      } catch (err: any) {
-        request.log.error({ sessionId: id, err: err.message }, 'Failed to delete session');
-        return reply.status(500).send({
-          success: false,
-          sessionId: id,
-          message: `Error purging session '${id}': ${err.message}`,
-        });
-      }
-    }
+  fastify.post<{ Params: SessionParams; Reply: ApiDeleteResponse }>(
+    '/sessions/:id/purge',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', minLength: 1 },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              sessionId: { type: 'string' },
+              message: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    handlePurgeSession
   );
 
   /**

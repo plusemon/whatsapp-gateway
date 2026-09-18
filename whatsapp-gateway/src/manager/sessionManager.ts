@@ -34,6 +34,7 @@ export interface RecentEvent {
 export class SessionManager {
   private activeSockets: Map<string, WASocket> = new Map();
   private metadataMap: Map<string, SessionMetadata> = new Map();
+  private terminatingSessions: Set<string> = new Set();
   private recentEvents: RecentEvent[] = [];
   private readonly maxEvents = 100;
 
@@ -70,6 +71,9 @@ export class SessionManager {
    * Connects to Redis for persistent authentication state and subscribes to lifecycle events.
    */
   public async initSession(sessionId: string): Promise<SessionMetadata> {
+    // Clear any terminating flag if re-initializing this session
+    this.terminatingSessions.delete(sessionId);
+
     const existingSocket = this.activeSockets.get(sessionId);
     const existingMeta = this.metadataMap.get(sessionId);
 
@@ -137,6 +141,17 @@ export class SessionManager {
 
       // Step D: Listen for connection updates (QR, open, close)
       sock.ev.on('connection.update', async (update) => {
+        // If session is marked for intentional termination/purge, suppress all updates and reconnect loops
+        if (this.terminatingSessions.has(sessionId)) {
+          logger.info(
+            { sessionId },
+            '[SessionManager] Connection update received during intentional purge; ignoring and bypassing reconnect.'
+          );
+          this.activeSockets.delete(sessionId);
+          this.metadataMap.delete(sessionId);
+          return;
+        }
+
         const { connection, lastDisconnect, qr } = update;
         meta.lastActiveAt = Date.now();
 
@@ -645,6 +660,8 @@ export class SessionManager {
    * Retrieves raw QR string for a given session from memory or Redis.
    */
   public async getQR(sessionId: string): Promise<string | null> {
+    if (this.terminatingSessions.has(sessionId)) return null;
+
     const meta = this.metadataMap.get(sessionId);
     if (meta?.qr) {
       return meta.qr;
@@ -669,6 +686,7 @@ export class SessionManager {
    * Retrieves session metadata.
    */
   public getSession(sessionId: string): SessionMetadata | null {
+    if (this.terminatingSessions.has(sessionId)) return null;
     return this.metadataMap.get(sessionId) || null;
   }
 
@@ -676,14 +694,16 @@ export class SessionManager {
    * Lists all sessions tracked by the manager.
    */
   public listSessions(): SessionSummary[] {
-    return Array.from(this.metadataMap.values()).map((m) => ({
-      id: m.id,
-      status: m.status,
-      hasQr: !!m.qr,
-      user: m.user,
-      createdAt: m.createdAt,
-      lastActiveAt: m.lastActiveAt,
-    }));
+    return Array.from(this.metadataMap.values())
+      .filter((m) => !this.terminatingSessions.has(m.id))
+      .map((m) => ({
+        id: m.id,
+        status: m.status,
+        hasQr: !!m.qr,
+        user: m.user,
+        createdAt: m.createdAt,
+        lastActiveAt: m.lastActiveAt,
+      }));
   }
 
   /**
@@ -924,31 +944,64 @@ export class SessionManager {
 
   /**
    * Disconnects a session socket, clears its local cache, and purges Redis auth state.
+   * Ensures intentional termination flag blocks any automated reconnect race conditions.
    */
   public async deleteSession(sessionId: string): Promise<void> {
+    // Step 1: Add sessionId to terminatingSessions
+    this.terminatingSessions.add(sessionId);
+
+    // Step 2: Remove the session from internal maps immediately
     const sock = this.activeSockets.get(sessionId);
-
-    if (sock) {
-      try {
-        sock.end(undefined);
-      } catch (err: any) {
-        logger.warn({ sessionId, err: err.message }, '[SessionManager] Socket end warning');
-      }
-      this.activeSockets.delete(sessionId);
-    }
-
+    this.activeSockets.delete(sessionId);
     this.metadataMap.delete(sessionId);
 
-    // Purge Redis keys
+    // Step 3: Call sock.ws.close() or sock.end(undefined)
+    if (sock) {
+      try {
+        if ((sock as any).ws && typeof (sock as any).ws.close === 'function') {
+          (sock as any).ws.close();
+        }
+        sock.end(undefined);
+      } catch (err: any) {
+        logger.warn({ sessionId, err: err.message }, '[SessionManager] Socket end warning during purge');
+      }
+    }
+
+    // Step 4: Remove all Redis keys associated with this session
     try {
       const redis = await getRedisClient();
+      let keys: string[] = [];
+      try {
+        keys = await redis.keys(`wa:session:${sessionId}:*`);
+      } catch (keyErr: any) {
+        logger.warn({ sessionId, err: keyErr.message }, '[SessionManager] Failed to query Redis keys during purge');
+      }
+
+      if (keys && keys.length > 0) {
+        await redis.del(...keys);
+        logger.info({ sessionId, count: keys.length }, '[SessionManager] Deleted Redis session keys via pattern');
+      }
+
+      // Extra safety: run clearRedisSession
       await clearRedisSession(redis, sessionId);
       logger.info({ sessionId }, '[SessionManager] Tenant session purged from Redis and memory');
     } catch (err: any) {
       logger.error({ sessionId, err: err.message }, '[SessionManager] Error clearing Redis on session delete');
     }
 
-    this.logEvent('session_event', sessionId, { action: 'deleted' });
+    // Step 5: After a short timeout, delete sessionId from terminatingSessions
+    setTimeout(() => {
+      this.terminatingSessions.delete(sessionId);
+    }, 5000);
+
+    this.logEvent('session_event', sessionId, { action: 'purged' });
+  }
+
+  /**
+   * Alias for deleteSession
+   */
+  public async purgeSession(sessionId: string): Promise<void> {
+    return this.deleteSession(sessionId);
   }
 }
 
