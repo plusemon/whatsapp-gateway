@@ -1,6 +1,6 @@
 {
   "name": "Botla WhatsApp Gateway",
-  "description": "Multi-tenant WhatsApp Web microservice using Baileys, Redis authentication state, and Fastify REST API.",
+  "description": "Multi-tenant WhatsApp Web microservice with Baileys, Redis auth state, media pipeline, pairing code, and auto-restore.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -1,219 +1,821 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Botla WhatsApp Gateway Microservice</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Botla WhatsApp Gateway</title>
+  <meta name="description" content="Multi-tenant WhatsApp Web microservice with Baileys, Redis auth state, media pipeline, pairing code, and auto-restore.">
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669',
+              900: '#064e3b',
+              950: '#022c22',
+            }
+          }
+        }
+      }
+    }
+  </script>
   <style>
-    body { background-color: #09090B; color: #FAFAFA; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    .card { background-color: #121215; border: 1px solid #27272A; border-radius: 1rem; }
-    .input-field { background-color: #18181B; border: 1px solid #27272A; color: #FAFAFA; }
-    .input-field:focus { border-color: #10B981; outline: none; }
-    .badge-online { background-color: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.3); }
-    .badge-qr { background-color: rgba(245, 158, 11, 0.15); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.3); }
-    .badge-offline { background-color: rgba(244, 63, 94, 0.15); color: #F43F5E; border: 1px solid rgba(244, 63, 94, 0.3); }
+    body {
+      background-color: #09090b;
+      color: #fafafa;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .card-surface {
+      background-color: #121216;
+      border: 1px solid #27272a;
+    }
+    .card-surface-subtle {
+      background-color: #18181c;
+      border: 1px solid #27272a;
+    }
+    .input-base {
+      background-color: #18181b;
+      border: 1px solid #27272a;
+      color: #fafafa;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .input-base:focus {
+      border-color: #10b981;
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+      outline: none;
+    }
+    .badge-online {
+      background-color: rgba(16, 185, 129, 0.12);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .badge-qr {
+      background-color: rgba(99, 102, 241, 0.12);
+      color: #818cf8;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+    .badge-connecting {
+      background-color: rgba(245, 158, 11, 0.12);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+    .badge-offline {
+      background-color: rgba(244, 63, 94, 0.12);
+      color: #f43f5e;
+      border: 1px solid rgba(244, 63, 94, 0.3);
+    }
+    /* Smooth custom scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #09090b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #27272a;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #3f3f46;
+    }
   </style>
 </head>
-<body class="min-h-screen p-4 md:p-8">
-  <div class="max-w-7xl mx-auto space-y-6">
-    <!-- Header -->
-    <header class="flex flex-col md:flex-row md:items-center md:justify-between pb-6 border-b border-zinc-800 gap-4">
-      <div>
-        <div class="flex items-center gap-3">
-          <div class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
-          <h1 class="text-2xl font-bold tracking-tight text-white">Botla WhatsApp Gateway</h1>
-          <span class="px-2.5 py-0.5 text-xs font-medium rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">Baileys + Redis</span>
-        </div>
-        <p class="text-sm text-zinc-400 mt-1">Decoupled Multi-Tenant WhatsApp Microservice for Botla Platform</p>
-      </div>
+<body class="min-h-screen pb-24 lg:pb-12 text-zinc-100 selection:bg-emerald-500 selection:text-black">
 
-      <div class="flex items-center gap-3 text-xs">
-        <div id="redis-badge" class="px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-400">
-          Redis: <span id="redis-status" class="text-emerald-400 font-mono font-medium">Checking...</span>
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-3"></div>
+
+  <!-- Main Container -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 space-y-5">
+    
+    <!-- Top Modern Header -->
+    <header class="card-surface rounded-2xl p-4 sm:p-5 shadow-sm">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <!-- Title & Subtitle -->
+        <div class="flex items-start sm:items-center gap-3.5">
+          <div class="relative flex-shrink-0 mt-1 sm:mt-0">
+            <div class="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+              </svg>
+            </div>
+            <span class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-zinc-900 animate-pulse"></span>
+          </div>
+
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-white truncate">Botla WhatsApp Gateway</h1>
+              <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-zinc-800/90 text-zinc-300 border border-zinc-700/80 whitespace-nowrap">Baileys + Redis</span>
+              <span class="hidden sm:inline-flex px-2 py-0.5 text-[11px] font-mono rounded bg-emerald-950/40 text-emerald-400 border border-emerald-800/40 whitespace-nowrap">Auto-Restore Ready</span>
+            </div>
+            <p class="text-xs text-zinc-400 mt-0.5">Multi-Tenant Gateway: Media Pipeline, Pairing Code & Auto-Recovery</p>
+          </div>
         </div>
-        <div class="px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-400">
-          Webhook: <span id="webhook-target" class="text-zinc-200 font-mono truncate max-w-[200px] inline-block align-bottom">Loading...</span>
+
+        <!-- Status Badges Bar -->
+        <div class="flex flex-wrap items-center gap-2 pt-2 lg:pt-0 border-t lg:border-t-0 border-zinc-800/80 text-xs font-mono">
+          <div id="redis-badge" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 text-zinc-400">
+            <span class="w-2 h-2 rounded-full bg-amber-400" id="redis-dot"></span>
+            <span>Redis:</span>
+            <span id="redis-status" class="text-amber-400 font-medium truncate max-w-[130px]">Checking...</span>
+          </div>
+
+          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 text-zinc-400">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span>Media:</span>
+            <span id="media-status" class="text-emerald-400 font-medium">/media/ active</span>
+          </div>
+
+          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 text-zinc-400 max-w-full sm:max-w-[260px]">
+            <span class="text-zinc-500">Hook:</span>
+            <span id="webhook-target" class="text-zinc-200 truncate cursor-pointer hover:text-white" title="Click to copy Webhook URL" onclick="copyWebhookUrl()">Loading...</span>
+            <button onclick="copyWebhookUrl()" class="text-zinc-500 hover:text-zinc-300 p-0.5" title="Copy webhook URL">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            </button>
+          </div>
+
+          <button onclick="manualRefreshAll()" class="p-2 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer ml-auto sm:ml-0" title="Refresh all data">
+            <svg id="refresh-spinner" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          </button>
         </div>
       </div>
     </header>
 
-    <!-- Main Grid -->
+    <!-- Mobile Viewport Tab Bar (< 1024px) -->
+    <div class="lg:hidden">
+      <div class="card-surface p-1.5 rounded-xl grid grid-cols-3 gap-1 text-xs font-semibold">
+        <button id="mobile-tab-sessions" onclick="switchMobileTab('sessions')" class="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer">
+          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+          <span>Sessions</span>
+          <span id="sessions-count-badge" class="ml-0.5 px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-mono">0</span>
+        </button>
+
+        <button id="mobile-tab-sender" onclick="switchMobileTab('sender')" class="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer">
+          <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+          <span>Console</span>
+        </button>
+
+        <button id="mobile-tab-stream" onclick="switchMobileTab('stream')" class="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer relative">
+          <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          <span>Stream</span>
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Content Layout (Tabs on Mobile, Multi-Column on Desktop) -->
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-      
-      <!-- Left Column: Session Controls & Active Tenants (7 Cols) -->
-      <div class="lg:col-span-7 space-y-6">
-        <!-- New Session Card -->
-        <div class="card p-6">
-          <h2 class="text-lg font-semibold text-white mb-2">Initialize Tenant Session</h2>
-          <p class="text-xs text-zinc-400 mb-4">Boots Baileys socket with Redis AuthState adapter for the specified tenant identifier.</p>
-          
-          <div class="flex gap-3">
-            <input id="new-session-id" type="text" placeholder="e.g. tenant-client-01" value="tenant-botla-1" class="input-field flex-1 rounded-xl px-4 py-2.5 text-sm" />
-            <button id="btn-init-session" onclick="initSession()" class="bg-white hover:bg-zinc-200 text-black font-semibold text-sm px-5 py-2.5 rounded-xl transition cursor-pointer">
-              Boot Session
-            </button>
-          </div>
-        </div>
 
-        <!-- Sessions List Card -->
-        <div class="card p-6">
-          <div class="flex items-center justify-between mb-4">
-            <div>
-              <h2 class="text-lg font-semibold text-white">Active Sessions</h2>
-              <p class="text-xs text-zinc-400">In-memory socket pool persisted in Redis</p>
-            </div>
-            <button onclick="loadSessions()" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition cursor-pointer">
-              Refresh
-            </button>
-          </div>
-
-          <div id="sessions-container" class="space-y-3">
-            <div class="p-6 text-center text-zinc-500 text-sm">Loading sessions...</div>
-          </div>
-        </div>
-
-        <!-- Outbound Message Tester Card -->
-        <div class="card p-6">
+      <!-- ======================================================== -->
+      <!-- SECTION A: SESSIONS & BOOT (Left column on desktop, Tab 1 on mobile) -->
+      <!-- ======================================================== -->
+      <div id="section-sessions" class="tab-panel lg:col-span-7 space-y-6">
+        
+        <!-- Boot Session Card -->
+        <div class="card-surface p-5 sm:p-6 rounded-2xl">
           <div class="flex items-center justify-between mb-2">
-            <h2 class="text-lg font-semibold text-white">Send Test Message</h2>
-            <span class="text-xs px-2.5 py-1 rounded bg-zinc-800 text-emerald-400 font-mono">Anti-Ban Guardrail Active</span>
+            <h2 class="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+              Initialize Tenant Session
+            </h2>
+            <span class="text-[11px] font-mono text-zinc-500">Redis AuthState</span>
           </div>
-          <p class="text-xs text-zinc-400 mb-4">Dispatches outbound WhatsApp message with simulated human typing delay (600ms - 1400ms).</p>
+          <p class="text-xs text-zinc-400 mb-4 leading-relaxed">
+            Spawns Baileys socket with Redis-backed authentication. Auto-reconnects on disconnection.
+          </p>
+          
+          <div class="flex flex-col sm:flex-row gap-2.5">
+            <div class="relative flex-1">
+              <input id="new-session-id" type="text" placeholder="e.g. tenant-botla-1" value="tenant-botla-1" class="input-base w-full rounded-xl px-4 py-3 text-sm font-mono placeholder:text-zinc-600" />
+            </div>
+            <button id="btn-init-session" onclick="initSession()" class="h-11 sm:h-auto bg-white hover:bg-zinc-200 text-black font-semibold text-sm px-6 py-2.5 rounded-xl transition-all duration-150 active:scale-95 cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap shadow-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+              <span>Boot Session</span>
+            </button>
+          </div>
 
-          <form id="send-form" onsubmit="handleSendMessage(event)" class="space-y-4">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID</label>
-                <input id="send-session-id" type="text" placeholder="e.g. tenant-botla-1" required class="input-field w-full rounded-xl px-3.5 py-2 text-sm" />
-              </div>
-              <div>
-                <label class="block text-xs font-medium text-zinc-400 mb-1">Target Phone / JID</label>
-                <input id="send-jid" type="text" placeholder="e.g. 8801700000000" required class="input-field w-full rounded-xl px-3.5 py-2 text-sm" />
-              </div>
-            </div>
+          <!-- Quick presets pills -->
+          <div class="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-zinc-800/60 text-[11px] text-zinc-400">
+            <span class="text-zinc-500">Quick ID:</span>
+            <button onclick="setSessionInput('tenant-botla-1')" class="px-2 py-0.5 rounded bg-zinc-800/70 hover:bg-zinc-700 text-zinc-300 font-mono transition">tenant-botla-1</button>
+            <button onclick="setSessionInput('marketing-wa')" class="px-2 py-0.5 rounded bg-zinc-800/70 hover:bg-zinc-700 text-zinc-300 font-mono transition">marketing-wa</button>
+            <button onclick="setSessionInput('support-bot')" class="px-2 py-0.5 rounded bg-zinc-800/70 hover:bg-zinc-700 text-zinc-300 font-mono transition">support-bot</button>
+          </div>
+        </div>
+
+        <!-- Active Sessions List Card -->
+        <div class="card-surface p-5 sm:p-6 rounded-2xl">
+          <div class="flex items-center justify-between mb-4 pb-3 border-b border-zinc-800/80">
             <div>
-              <label class="block text-xs font-medium text-zinc-400 mb-1">Message Text</label>
-              <textarea id="send-text" rows="2" placeholder="Hello from Botla WhatsApp Gateway!" required class="input-field w-full rounded-xl px-3.5 py-2 text-sm"></textarea>
+              <div class="flex items-center gap-2">
+                <h2 class="text-base sm:text-lg font-semibold text-white">Active Sessions</h2>
+                <span id="sessions-total-count" class="px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-zinc-800 text-zinc-300">0</span>
+              </div>
+              <p class="text-xs text-zinc-400 mt-0.5">In-memory Baileys socket pool with multi-tenant Redis sync</p>
             </div>
-            <div class="flex items-center justify-between pt-1">
-              <span id="send-status" class="text-xs text-zinc-500">Ready to dispatch</span>
-              <button id="btn-send" type="submit" class="bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm px-5 py-2 rounded-xl transition cursor-pointer">
-                Send via Gateway
+            
+            <button onclick="loadSessions()" class="px-3 py-1.5 text-xs font-medium rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700/80 transition active:scale-95 cursor-pointer flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          <!-- Sessions Container -->
+          <div id="sessions-container" class="space-y-3">
+            <div class="p-8 text-center text-zinc-500 text-sm">Loading sessions...</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ======================================================== -->
+      <!-- SECTION B: OUTBOUND DISPATCHER / SENDER (Left col on desktop, Tab 2 on mobile) -->
+      <!-- ======================================================== -->
+      <div id="section-sender" class="tab-panel lg:col-span-7 space-y-6 hidden lg:block">
+        
+        <!-- Outbound Dispatcher Card -->
+        <div class="card-surface p-5 sm:p-6 rounded-2xl">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-zinc-800 pb-4 mb-5">
+            <div class="flex items-center gap-2">
+              <button id="tab-btn-text" onclick="switchSendTab('text')" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-zinc-800 text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                <span>Send Text</span>
+              </button>
+              <button id="tab-btn-media" onclick="switchSendTab('media')" class="px-3.5 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                <span>Send Media</span>
+              </button>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] px-2.5 py-1 rounded-lg bg-zinc-800/80 text-emerald-400 font-mono border border-emerald-900/30 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                Anti-Ban Presence
+              </span>
+            </div>
+          </div>
+
+          <!-- Send Text Form -->
+          <form id="send-form" onsubmit="handleSendMessage(event)" class="space-y-4">
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs font-medium text-zinc-300 mb-1.5 flex items-center justify-between">
+                  <span>Session ID</span>
+                  <span class="text-[11px] text-zinc-500">Must be an active socket</span>
+                </label>
+                <div class="relative">
+                  <input id="send-session-id" list="active-sessions-datalist" type="text" placeholder="e.g. tenant-botla-1" required class="input-base w-full rounded-xl px-4 py-3 text-sm font-mono" />
+                  <datalist id="active-sessions-datalist"></datalist>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-medium text-zinc-300 mb-1.5 flex items-center justify-between">
+                  <span>Target Phone / JID</span>
+                  <span class="text-[11px] text-zinc-500">With country code (no + sign)</span>
+                </label>
+                <input id="send-jid" type="text" placeholder="e.g. 8801700000000 or 15551234567" required class="input-base w-full rounded-xl px-4 py-3 text-sm font-mono placeholder:text-zinc-600" />
+              </div>
+
+              <div>
+                <label class="block text-xs font-medium text-zinc-300 mb-1.5 flex items-center justify-between">
+                  <span>Message Content</span>
+                  <span class="text-[11px] text-zinc-500">Markdown & emojis supported</span>
+                </label>
+                <textarea id="send-text" rows="3" placeholder="Hello from Botla WhatsApp Gateway!" required class="input-base w-full rounded-xl p-3.5 text-sm resize-y placeholder:text-zinc-600"></textarea>
+              </div>
+            </div>
+
+            <!-- Quick Template Chips -->
+            <div class="flex flex-wrap gap-1.5 pt-1 text-[11px]">
+              <span class="text-zinc-500 py-0.5">Quick text:</span>
+              <button type="button" onclick="setSendTemplate('Hello from Botla WhatsApp Gateway! Gateway active & operational.')" class="px-2 py-0.5 rounded bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 transition">Test Ping</button>
+              <button type="button" onclick="setSendTemplate('Your verification code is: 482910. Do not share this with anyone.')" class="px-2 py-0.5 rounded bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 transition">OTP Sample</button>
+              <button type="button" onclick="setSendTemplate('Your order #9821 has been confirmed! We will notify you when it ships.')" class="px-2 py-0.5 rounded bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 transition">Order Update</button>
+            </div>
+
+            <!-- Form Action Footer -->
+            <div class="pt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <span id="send-status" class="text-xs text-zinc-400 flex items-center gap-1.5 order-2 sm:order-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
+                Simulates natural human typing delay (600ms - 1400ms)
+              </span>
+
+              <button id="btn-send" type="submit" class="w-full sm:w-auto order-1 sm:order-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm px-6 py-3 rounded-xl transition-all duration-150 active:scale-95 cursor-pointer flex items-center justify-center gap-2 shadow-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                <span>Send via Gateway</span>
+              </button>
+            </div>
+          </form>
+
+          <!-- Send Media Form -->
+          <form id="send-media-form" onsubmit="handleSendMedia(event)" class="space-y-4 hidden">
+            <div class="space-y-3">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-zinc-300 mb-1.5">Session ID</label>
+                  <input id="media-session-id" list="active-sessions-datalist" type="text" placeholder="e.g. tenant-botla-1" required class="input-base w-full rounded-xl px-4 py-3 text-sm font-mono" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-zinc-300 mb-1.5">Target Phone / JID</label>
+                  <input id="media-jid" type="text" placeholder="e.g. 8801700000000" required class="input-base w-full rounded-xl px-4 py-3 text-sm font-mono" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-zinc-300 mb-1.5">Media Type</label>
+                  <select id="media-type" class="input-base w-full rounded-xl px-3.5 py-3 text-sm cursor-pointer" onchange="toggleMediaFields()">
+                    <option value="image">Image (jpg / png)</option>
+                    <option value="audio">Audio / Voice Note</option>
+                    <option value="document">Document (PDF / doc)</option>
+                  </select>
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="block text-xs font-medium text-zinc-300 mb-1.5">Public Media URL</label>
+                  <input id="media-url" type="url" placeholder="https://images.unsplash.com/photo-1579546929518-9e396f3cc809" required class="input-base w-full rounded-xl px-4 py-3 text-sm font-mono placeholder:text-zinc-600" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div id="caption-container">
+                  <label class="block text-xs font-medium text-zinc-300 mb-1.5">Caption (Optional)</label>
+                  <input id="media-caption" type="text" placeholder="e.g. Monthly statement attachment" class="input-base w-full rounded-xl px-4 py-3 text-sm" />
+                </div>
+                <div id="filename-container">
+                  <label class="block text-xs font-medium text-zinc-300 mb-1.5">File Name (Optional)</label>
+                  <input id="media-filename" type="text" placeholder="e.g. invoice-2026.pdf" class="input-base w-full rounded-xl px-4 py-3 text-sm" />
+                </div>
+              </div>
+
+              <div id="ptt-container" class="hidden p-3 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center gap-3">
+                <input type="checkbox" id="media-ptt" class="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 cursor-pointer" />
+                <label for="media-ptt" class="text-xs text-zinc-300 cursor-pointer select-none">
+                  Send as Push-to-Talk (PTT) Voice Note <span class="text-zinc-500">(Simulates WhatsApp "recording..." state)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Form Action Footer -->
+            <div class="pt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <span id="send-media-status" class="text-xs text-zinc-400 flex items-center gap-1.5 order-2 sm:order-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
+                Ready to stream media payload
+              </span>
+
+              <button id="btn-send-media" type="submit" class="w-full sm:w-auto order-1 sm:order-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm px-6 py-3 rounded-xl transition-all duration-150 active:scale-95 cursor-pointer flex items-center justify-center gap-2 shadow-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                <span>Dispatch Media</span>
               </button>
             </div>
           </form>
         </div>
+
       </div>
 
-      <!-- Right Column: QR Code & Live Event Log (5 Cols) -->
-      <div class="lg:col-span-5 space-y-6">
-        <!-- QR Code Scanner Card -->
-        <div class="card p-6 flex flex-col items-center justify-center text-center min-h-[380px]">
-          <div class="w-full flex items-center justify-between mb-4">
-            <h2 class="text-lg font-semibold text-white">Device Pairing</h2>
-            <span id="qr-status-badge" class="px-3 py-1 rounded-full text-xs font-medium bg-zinc-800 text-zinc-400">Idle</span>
-          </div>
+      <!-- ======================================================== -->
+      <!-- SECTION C: LIVE STREAM & LOGS (Right column on desktop, Tab 3 on mobile) -->
+      <!-- ======================================================== -->
+      <div id="section-stream" class="tab-panel lg:col-span-5 space-y-6 hidden lg:block">
+        
+        <!-- Live Activity Stream Card -->
+        <div class="card-surface p-5 sm:p-6 rounded-2xl flex flex-col">
+          <div class="flex items-center justify-between mb-3 pb-3 border-b border-zinc-800/80">
+            <div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-base sm:text-lg font-semibold text-white">Live Activity Stream</h2>
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              </div>
+              <p class="text-xs text-zinc-400 mt-0.5">Inbound, outbound, webhooks & socket lifecycle</p>
+            </div>
 
-          <div id="qr-display-box" class="w-64 h-64 rounded-2xl border-2 border-dashed border-zinc-800 flex items-center justify-center p-2 bg-zinc-950/60 overflow-hidden relative">
-            <img id="qr-image" class="hidden w-full h-full object-contain rounded-xl" alt="WhatsApp QR Code" />
-            <div id="qr-placeholder" class="text-xs text-zinc-500 p-4 leading-relaxed">
-              No active QR code requested.<br />Select or boot a session on the left to stream pairing QR.
+            <div class="flex items-center gap-1.5">
+              <button onclick="clearEventFeed()" class="px-2.5 py-1 text-[11px] rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition cursor-pointer">
+                Clear
+              </button>
+              <button id="btn-stream-pause" onclick="toggleStreamPause()" class="px-2.5 py-1 text-[11px] rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition cursor-pointer">
+                Pause
+              </button>
             </div>
           </div>
 
-          <div id="qr-actions" class="mt-4 hidden space-y-1">
-            <p id="qr-session-label" class="text-xs font-mono text-zinc-400"></p>
-            <p class="text-[11px] text-zinc-500">Open WhatsApp &gt; Linked Devices &gt; Link a Device</p>
+          <!-- Event Type Filter Pills -->
+          <div class="flex items-center gap-1 overflow-x-auto pb-2 mb-2 text-[11px] scrollbar-none">
+            <button onclick="setEventFilter('all')" class="event-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 text-white font-medium whitespace-nowrap cursor-pointer" data-filter="all">All</button>
+            <button onclick="setEventFilter('inbound_message')" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer" data-filter="inbound_message">Inbound</button>
+            <button onclick="setEventFilter('outbound_message')" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer" data-filter="outbound_message">Outbound</button>
+            <button onclick="setEventFilter('webhook')" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer" data-filter="webhook">Webhooks</button>
+            <button onclick="setEventFilter('session_event')" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer" data-filter="session_event">Socket</button>
+          </div>
+
+          <!-- Events Feed Container with Constrained Height -->
+          <div id="events-feed" class="h-80 sm:h-96 overflow-y-auto space-y-2 pr-1 text-xs">
+            <div class="text-zinc-500 text-center py-16 flex flex-col items-center justify-center gap-2">
+              <svg class="w-6 h-6 text-zinc-600 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+              <span>Listening for gateway events...</span>
+            </div>
+          </div>
+
+          <!-- Bottom Stream Stats -->
+          <div class="pt-3 mt-3 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-500">
+            <span id="stream-counter">0 events logged</span>
+            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+              <input type="checkbox" id="stream-autoscroll" checked class="rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0 w-3.5 h-3.5" />
+              <span>Auto-scroll</span>
+            </label>
           </div>
         </div>
 
-        <!-- Realtime Events Feed -->
-        <div class="card p-6">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="text-lg font-semibold text-white">Live Activity Stream</h2>
-            <span class="text-[11px] text-zinc-500">Auto-refresh (2s)</span>
+        <!-- System Architecture Card (Desktop Only Helper) -->
+        <div class="card-surface p-5 rounded-2xl text-xs space-y-3 text-zinc-400">
+          <div class="flex items-center justify-between text-zinc-200 font-semibold">
+            <span>Gateway Architecture</span>
+            <span class="text-emerald-400 font-mono text-[11px]">v1.0.0</span>
           </div>
-          <div id="events-feed" class="h-64 overflow-y-auto space-y-2 pr-1 text-xs font-mono">
-            <div class="text-zinc-600 text-center py-8">Waiting for gateway activity...</div>
+          <p class="text-zinc-400 leading-relaxed">
+            Multi-tenant WhatsApp microservice built on WhiskeySockets Baileys with custom Redis auth adapter. Supports automatic reconnection, inbound webhook HMAC dispatching, and background auto-restore on container boot.
+          </p>
+          <div class="grid grid-cols-2 gap-2 pt-1 font-mono text-[11px]">
+            <div class="p-2 rounded-lg bg-zinc-900/80 border border-zinc-800/80">
+              <div class="text-zinc-500">Port:</div>
+              <div class="text-zinc-200">3000</div>
+            </div>
+            <div class="p-2 rounded-lg bg-zinc-900/80 border border-zinc-800/80">
+              <div class="text-zinc-500">Engine:</div>
+              <div class="text-zinc-200">Fastify + Baileys</div>
+            </div>
           </div>
         </div>
+
       </div>
+
     </div>
   </div>
 
+  <!-- ======================================================== -->
+  <!-- MODAL / BOTTOM SHEET: QR CODE & PAIRING CODE -->
+  <!-- ======================================================== -->
+  <div id="qr-modal" class="fixed inset-0 z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm transition-opacity duration-200">
+    <div class="card-surface w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl p-5 sm:p-6 shadow-2xl relative max-h-[92vh] overflow-y-auto border border-zinc-800">
+      
+      <!-- Modal Header -->
+      <div class="flex items-start justify-between pb-4 border-b border-zinc-800">
+        <div>
+          <div class="flex items-center gap-2">
+            <h3 class="text-lg font-bold text-white">Device Pairing</h3>
+            <span id="qr-status-badge" class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-400">Idle</span>
+          </div>
+          <p id="qr-session-label" class="text-xs font-mono text-emerald-400 mt-1">No session selected</p>
+        </div>
+
+        <button onclick="closeQrModal()" class="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition active:scale-95 cursor-pointer" title="Close modal">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+
+      <!-- Modal Tabs: QR Code vs Phone Pairing Code -->
+      <div class="grid grid-cols-2 gap-1.5 p-1 bg-zinc-950 rounded-xl my-4 text-xs font-semibold">
+        <button id="pairing-tab-qr" onclick="switchPairingTab('qr')" class="py-2 px-3 rounded-lg bg-zinc-800 text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
+          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+          <span>QR Scan</span>
+        </button>
+        <button id="pairing-tab-code" onclick="switchPairingTab('code')" class="py-2 px-3 rounded-lg text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
+          <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+          <span>Phone Code</span>
+        </button>
+      </div>
+
+      <!-- Sub-view 1: QR Code Scanner -->
+      <div id="pairing-view-qr" class="flex flex-col items-center text-center space-y-4">
+        <!-- QR Display Canvas Box -->
+        <div id="qr-display-box" class="w-64 h-64 rounded-2xl border border-zinc-700/80 bg-zinc-950 flex items-center justify-center p-3 relative overflow-hidden shadow-inner">
+          <img id="qr-image" class="hidden w-full h-full object-contain rounded-xl bg-white p-2" alt="WhatsApp QR Code" />
+          <div id="qr-placeholder" class="text-xs text-zinc-400 p-4 leading-relaxed flex flex-col items-center justify-center gap-2">
+            <svg class="w-8 h-8 text-zinc-600 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            <span>Connecting socket & generating QR code...</span>
+          </div>
+        </div>
+
+        <!-- Polling Indicator -->
+        <div class="flex items-center gap-2 text-xs text-zinc-400">
+          <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+          <span id="qr-poll-countdown">Polling socket (3s refresh)</span>
+        </div>
+
+        <div id="qr-actions" class="w-full p-3 rounded-xl bg-zinc-950/80 border border-zinc-800 text-left text-xs space-y-1.5">
+          <div class="font-medium text-zinc-200">How to scan:</div>
+          <ol class="list-decimal list-inside text-zinc-400 space-y-0.5 text-[11px]">
+            <li>Open WhatsApp on your mobile phone</li>
+            <li>Tap <span class="text-zinc-200 font-medium">Settings &gt; Linked Devices</span></li>
+            <li>Tap <span class="text-zinc-200 font-medium">Link a Device</span> and scan this QR code</li>
+          </ol>
+        </div>
+      </div>
+
+      <!-- Sub-view 2: Phone Number Pairing Code (Alternative) -->
+      <div id="pairing-view-code" class="hidden space-y-4 text-left">
+        <p class="text-xs text-zinc-400 leading-relaxed">
+          Link without scanning a QR code. Enter phone number with country code to receive an 8-character pairing code on your screen.
+        </p>
+        
+        <div>
+          <label class="block text-xs font-medium text-zinc-300 mb-1">Session Target</label>
+          <input id="pair-code-session" type="text" placeholder="e.g. tenant-botla-1" class="input-base w-full rounded-xl px-4 py-2.5 text-sm font-mono" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-zinc-300 mb-1">WhatsApp Phone Number</label>
+          <div class="flex gap-2">
+            <input id="pair-code-phone" type="tel" placeholder="e.g. 8801712345678 or 15551234567" class="input-base flex-1 rounded-xl px-4 py-2.5 text-sm font-mono placeholder:text-zinc-600" />
+            <button id="btn-pair-code" onclick="requestPairingCode()" class="h-10 bg-white hover:bg-zinc-200 text-black font-semibold text-xs px-4 py-2 rounded-xl transition active:scale-95 cursor-pointer whitespace-nowrap flex items-center gap-1.5">
+              <span>Get Code</span>
+            </button>
+          </div>
+          <p class="text-[11px] text-zinc-500 mt-1">Country code prefix without leading '+' or spaces</p>
+        </div>
+
+        <div id="pair-code-result-box" class="hidden p-4 rounded-xl bg-zinc-950 border border-emerald-500/40 text-center space-y-2">
+          <div class="text-xs text-zinc-400">Enter this code in WhatsApp:</div>
+          <div class="flex items-center justify-center gap-3">
+            <div id="pair-code-display" class="text-3xl font-bold font-mono tracking-widest text-emerald-400 py-1">----</div>
+            <button onclick="copyPairCode()" class="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition active:scale-95 cursor-pointer" title="Copy code">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            </button>
+          </div>
+          <div class="text-[11px] text-zinc-400 leading-tight">
+            WhatsApp &gt; Linked Devices &gt; Link with phone number &gt; Enter code
+          </div>
+        </div>
+        
+        <div id="pair-code-status" class="text-xs text-zinc-400 text-center min-h-[18px]"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Sticky Mobile Bottom Navigation (< 1024px) -->
+  <nav class="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 px-4 py-2 flex items-center justify-around text-xs">
+    <button onclick="switchMobileTab('sessions')" id="bottom-nav-sessions" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-emerald-400 transition cursor-pointer">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+      <span class="text-[10px] font-medium">Sessions</span>
+    </button>
+
+    <button onclick="switchMobileTab('sender')" id="bottom-nav-sender" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+      <span class="text-[10px] font-medium">Console</span>
+    </button>
+
+    <button onclick="switchMobileTab('stream')" id="bottom-nav-stream" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer relative">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+      <span class="text-[10px] font-medium">Stream</span>
+      <span class="absolute top-1 right-3 w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+    </button>
+  </nav>
+
+  <!-- Javascript Core Logic -->
   <script>
     let activeQrSession = null;
     let qrPollInterval = null;
+    let streamPaused = false;
+    let currentEventFilter = 'all';
+    let cachedEventsList = [];
+    let currentWebhookUrl = '';
 
+    // ==========================================
+    // Network Helper with Safe JSON
+    // ==========================================
     async function safeFetchJson(url, options = {}) {
       try {
         const res = await fetch(url, options);
-        if (!res.ok) return null;
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          return body || { success: false, status: res.status };
+        }
         const contentType = res.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) return null;
         return await res.json();
-      } catch {
+      } catch (err) {
         return null;
       }
     }
 
+    // ==========================================
+    // Toast Notification System
+    // ==========================================
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      
+      let borderClass = 'border-zinc-700 bg-zinc-900/95 text-zinc-200';
+      let icon = '<svg class="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+      
+      if (type === 'error') {
+        borderClass = 'border-rose-900/50 bg-rose-950/90 text-rose-200';
+        icon = '<svg class="w-4 h-4 text-rose-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+      } else if (type === 'warn') {
+        borderClass = 'border-amber-900/50 bg-amber-950/90 text-amber-200';
+        icon = '<svg class="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>';
+      }
+
+      toast.className = `p-3 rounded-xl border shadow-lg flex items-center gap-2.5 text-xs pointer-events-auto transform transition-all duration-200 translate-y-2 opacity-0 ${borderClass}`;
+      toast.innerHTML = `${icon}<span class="flex-1">${message}</span>`;
+
+      container.appendChild(toast);
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 250);
+      }, 3500);
+    }
+
+    // ==========================================
+    // Mobile Tab Navigation Switcher
+    // ==========================================
+    function switchMobileTab(tab) {
+      const panelSessions = document.getElementById('section-sessions');
+      const panelSender = document.getElementById('section-sender');
+      const panelStream = document.getElementById('section-stream');
+
+      const tabSessions = document.getElementById('mobile-tab-sessions');
+      const tabSender = document.getElementById('mobile-tab-sender');
+      const tabStream = document.getElementById('mobile-tab-stream');
+
+      const navSessions = document.getElementById('bottom-nav-sessions');
+      const navSender = document.getElementById('bottom-nav-sender');
+      const navStream = document.getElementById('bottom-nav-stream');
+
+      // Hide all panels on mobile (preserve lg:block for desktop!)
+      [panelSessions, panelSender, panelStream].forEach(p => {
+        p.classList.add('hidden');
+      });
+
+      // Reset tab button states
+      [tabSessions, tabSender, tabStream].forEach(t => {
+        t.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer';
+      });
+
+      // Reset bottom nav states
+      [navSessions, navSender, navStream].forEach(n => {
+        n.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer relative';
+      });
+
+      if (tab === 'sessions') {
+        panelSessions.classList.remove('hidden');
+        tabSessions.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
+        navSessions.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-emerald-400 transition cursor-pointer';
+      } else if (tab === 'sender') {
+        panelSender.classList.remove('hidden');
+        tabSender.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
+        navSender.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-indigo-400 transition cursor-pointer';
+      } else if (tab === 'stream') {
+        panelStream.classList.remove('hidden');
+        tabStream.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
+        navStream.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-cyan-400 transition cursor-pointer relative';
+      }
+    }
+
+    // ==========================================
+    // Health & System Metrics
+    // ==========================================
     async function checkHealth() {
       const data = await safeFetchJson('/api/health');
+      const redisStatus = document.getElementById('redis-status');
+      const redisDot = document.getElementById('redis-dot');
+
       if (!data) {
-        document.getElementById('redis-status').textContent = 'offline';
-        document.getElementById('redis-status').className = 'text-rose-400 font-mono font-medium';
+        redisStatus.textContent = 'offline';
+        redisStatus.className = 'text-rose-400 font-mono font-medium';
+        redisDot.className = 'w-2 h-2 rounded-full bg-rose-400';
         return;
       }
-      document.getElementById('redis-status').textContent = data.redis;
-      if (data.redis.includes('connected')) {
-        document.getElementById('redis-status').className = 'text-emerald-400 font-mono font-medium';
+
+      redisStatus.textContent = data.redis || 'active';
+      if (data.redis && (data.redis.includes('connected') || data.redis.includes('fallback') || data.redis.includes('memory'))) {
+        redisStatus.className = 'text-emerald-400 font-mono font-medium';
+        redisDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
       } else {
-        document.getElementById('redis-status').className = 'text-amber-400 font-mono font-medium';
+        redisStatus.className = 'text-amber-400 font-mono font-medium';
+        redisDot.className = 'w-2 h-2 rounded-full bg-amber-400';
       }
+
       if (data.webhookUrl) {
+        currentWebhookUrl = data.webhookUrl;
         document.getElementById('webhook-target').textContent = data.webhookUrl;
       }
     }
 
+    function copyWebhookUrl() {
+      if (!currentWebhookUrl) return;
+      navigator.clipboard.writeText(currentWebhookUrl).then(() => {
+        showToast('Webhook URL copied to clipboard');
+      }).catch(() => {
+        showToast('Failed to copy', 'error');
+      });
+    }
+
+    // ==========================================
+    // Session Management & Rendering
+    // ==========================================
     async function loadSessions() {
       const data = await safeFetchJson('/api/sessions');
-      if (!data) return;
       const container = document.getElementById('sessions-container');
+      const totalCount = document.getElementById('sessions-total-count');
+      const countBadge = document.getElementById('sessions-count-badge');
+      const datalist = document.getElementById('active-sessions-datalist');
 
-      if (!data.sessions || data.sessions.length === 0) {
-        container.innerHTML = '<div class="p-6 text-center text-zinc-500 text-sm">No active sessions. Initialize one above.</div>';
+      if (!data || !data.sessions) {
+        container.innerHTML = '<div class="p-8 text-center text-zinc-500 text-sm">Failed to connect to gateway.</div>';
         return;
       }
 
-      container.innerHTML = data.sessions.map(s => {
+      const sessions = data.sessions;
+      totalCount.textContent = sessions.length;
+      countBadge.textContent = sessions.length;
+
+      // Populate autocomplete datalist
+      datalist.innerHTML = sessions.map(s => `<option value="${s.id}">${s.status}</option>`).join('');
+
+      if (sessions.length === 0) {
+        container.innerHTML = `
+          <div class="p-8 text-center rounded-xl bg-zinc-950/60 border border-zinc-800/80 text-zinc-500 text-sm space-y-2">
+            <div class="w-10 h-10 mx-auto rounded-full bg-zinc-900 flex items-center justify-center text-zinc-600">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+            </div>
+            <p class="font-medium text-zinc-400">No Active Sessions</p>
+            <p class="text-xs text-zinc-500">Initialize a tenant session above to connect your WhatsApp account.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = sessions.map(s => {
         let badgeClass = 'badge-offline';
-        if (s.status === 'connected') badgeClass = 'badge-online';
-        else if (s.status === 'qr_ready' || s.status === 'connecting') badgeClass = 'badge-qr';
+        let dotClass = 'bg-zinc-600';
+        let statusLabel = s.status || 'disconnected';
+
+        if (s.status === 'connected') {
+          badgeClass = 'badge-online';
+          dotClass = 'bg-emerald-400';
+        } else if (s.status === 'qr_ready') {
+          badgeClass = 'badge-qr';
+          dotClass = 'bg-indigo-400 animate-ping';
+        } else if (s.status === 'connecting') {
+          badgeClass = 'badge-connecting';
+          dotClass = 'bg-amber-400 animate-pulse';
+        }
+
+        const userPhone = s.user ? (s.user.id || s.user.name || 'Authenticated') : 'Awaiting authentication';
 
         return `
-          <div class="flex items-center justify-between p-3.5 rounded-xl bg-zinc-900 border border-zinc-800/80">
-            <div class="flex items-center gap-3">
-              <div class="w-2.5 h-2.5 rounded-full ${s.status === 'connected' ? 'bg-emerald-400' : (s.status === 'qr_ready' ? 'bg-amber-400 animate-ping' : 'bg-zinc-600')}"></div>
-              <div>
-                <div class="font-medium text-white text-sm flex items-center gap-2">
-                  ${s.id}
-                  <span class="text-[10px] px-2 py-0.5 rounded-full ${badgeClass}">${s.status}</span>
+          <div class="p-4 rounded-xl bg-zinc-900/90 border border-zinc-800/80 hover:border-zinc-700/80 transition-all space-y-3">
+            <!-- Card Header -->
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center flex-shrink-0 relative">
+                  <svg class="w-4 h-4 text-zinc-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                  </svg>
+                  <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ${dotClass}"></span>
                 </div>
-                <div class="text-[11px] text-zinc-400">
-                  ${s.user ? ('User: ' + s.user.id) : 'Awaiting authentication'}
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-mono text-white text-sm font-semibold truncate">${s.id}</span>
+                    <span class="text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}">${statusLabel}</span>
+                  </div>
+                  <div class="text-xs text-zinc-400 truncate mt-0.5 flex items-center gap-1.5">
+                    <span class="text-zinc-500">Target:</span>
+                    <span class="text-zinc-300 font-mono">${userPhone}</span>
+                  </div>
                 </div>
               </div>
             </div>
-            <div class="flex items-center gap-2">
-              <button onclick="viewQr('${s.id}')" class="px-2.5 py-1.5 text-xs rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition cursor-pointer">
-                QR Code
+
+            <!-- Mobile & Desktop Action Bar (Clean 3-column / wrapping grid with min 40px touch targets) -->
+            <div class="pt-2 border-t border-zinc-800/60 grid grid-cols-3 gap-2">
+              <button onclick="viewQr('${s.id}')" class="h-10 px-2.5 rounded-xl border border-zinc-700/80 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
+                <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+                <span>Pairing</span>
               </button>
-              <button onclick="fillSender('${s.id}')" class="px-2.5 py-1.5 text-xs rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition cursor-pointer">
-                Use in Sender
+
+              <button onclick="selectSessionForSend('${s.id}')" class="h-10 px-2.5 rounded-xl border border-zinc-700/80 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
+                <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                <span>Test Send</span>
               </button>
-              <button onclick="deleteSession('${s.id}')" class="px-2.5 py-1.5 text-xs rounded-lg border border-rose-900/50 bg-rose-950/30 hover:bg-rose-900/50 text-rose-300 transition cursor-pointer">
-                Purge
+
+              <button onclick="deleteSession('${s.id}')" class="h-10 px-2.5 rounded-xl border border-rose-900/40 bg-rose-950/20 hover:bg-rose-900/40 text-rose-300 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                <span>Purge</span>
               </button>
             </div>
           </div>
@@ -221,39 +823,136 @@
       }).join('');
     }
 
+    function setSessionInput(val) {
+      document.getElementById('new-session-id').value = val;
+    }
+
     async function initSession() {
       const input = document.getElementById('new-session-id');
       const id = input.value.trim();
-      if (!id) return;
+      if (!id) {
+        showToast('Please enter a session identifier', 'warn');
+        return;
+      }
 
       const btn = document.getElementById('btn-init-session');
       btn.disabled = true;
-      btn.textContent = 'Booting...';
+      btn.innerHTML = `
+        <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        <span>Booting...</span>
+      `;
 
       try {
         const res = await fetch('/api/sessions/' + encodeURIComponent(id) + '/init', { method: 'POST' });
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          await res.json();
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.success) {
+          showToast(`Session '${id}' booted!`);
+          fillSender(id);
+          viewQr(id);
+          await loadSessions();
+        } else {
+          showToast(`Failed: ${data.message || 'Unknown error'}`, 'error');
         }
-        viewQr(id);
-        loadSessions();
-      } catch (e) {
-        console.warn('Failed to boot session', e);
+      } catch (err) {
+        showToast('Connection error: ' + err.message, 'error');
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Boot Session';
+        btn.innerHTML = `
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          <span>Boot Session</span>
+        `;
+        fetchEvents();
       }
     }
 
     function fillSender(sessionId) {
       document.getElementById('send-session-id').value = sessionId;
-      document.getElementById('send-jid').focus();
+      document.getElementById('media-session-id').value = sessionId;
+      document.getElementById('pair-code-session').value = sessionId;
+    }
+
+    function selectSessionForSend(sessionId) {
+      fillSender(sessionId);
+      // If on mobile, switch to Sender tab smoothly
+      switchMobileTab('sender');
+      document.getElementById('send-text').focus();
+      showToast(`Selected '${sessionId}' in console`);
+    }
+
+    async function deleteSession(sessionId) {
+      if (!confirm(`Are you sure you want to disconnect socket and purge session '${sessionId}' from Redis?`)) {
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.success) {
+          showToast(`Session '${sessionId}' disconnected & purged`);
+          if (activeQrSession === sessionId) {
+            closeQrModal();
+          }
+          await loadSessions();
+          fetchEvents();
+        } else {
+          showToast(`Purge failed: ${data.message || 'Unknown'}`, 'error');
+        }
+      } catch (err) {
+        showToast('Purge error: ' + err.message, 'error');
+      }
+    }
+
+    // ==========================================
+    // QR Code Modal & Phone Pairing Code
+    // ==========================================
+    function openQrModal() {
+      const modal = document.getElementById('qr-modal');
+      modal.classList.remove('hidden');
+    }
+
+    function closeQrModal() {
+      const modal = document.getElementById('qr-modal');
+      modal.classList.add('hidden');
+      if (qrPollInterval) {
+        clearInterval(qrPollInterval);
+        qrPollInterval = null;
+      }
+    }
+
+    // Close modal on Escape or backdrop click
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeQrModal();
+    });
+    document.getElementById('qr-modal').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('qr-modal')) closeQrModal();
+    });
+
+    function switchPairingTab(tab) {
+      const viewQr = document.getElementById('pairing-view-qr');
+      const viewCode = document.getElementById('pairing-view-code');
+      const btnQr = document.getElementById('pairing-tab-qr');
+      const btnCode = document.getElementById('pairing-tab-code');
+
+      if (tab === 'qr') {
+        viewQr.classList.remove('hidden');
+        viewCode.classList.add('hidden');
+        btnQr.className = 'py-2 px-3 rounded-lg bg-zinc-800 text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
+        btnCode.className = 'py-2 px-3 rounded-lg text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
+      } else {
+        viewQr.classList.add('hidden');
+        viewCode.classList.remove('hidden');
+        btnCode.className = 'py-2 px-3 rounded-lg bg-zinc-800 text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
+        btnQr.className = 'py-2 px-3 rounded-lg text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
+      }
     }
 
     async function viewQr(sessionId) {
       activeQrSession = sessionId;
       document.getElementById('qr-session-label').textContent = 'Session: ' + sessionId;
+      document.getElementById('pair-code-session').value = sessionId;
+      openQrModal();
 
       if (qrPollInterval) clearInterval(qrPollInterval);
       await fetchAndDisplayQr();
@@ -267,33 +966,151 @@
 
       const placeholder = document.getElementById('qr-placeholder');
       const img = document.getElementById('qr-image');
-      const actions = document.getElementById('qr-actions');
       const badge = document.getElementById('qr-status-badge');
 
       if (data.status === 'connected') {
         img.classList.add('hidden');
         placeholder.classList.remove('hidden');
-        placeholder.innerHTML = '<span class="text-emerald-400 font-semibold block text-base mb-1">✓ Connected</span>Session is actively authenticated with WhatsApp.';
-        actions.classList.remove('hidden');
+        placeholder.innerHTML = `
+          <div class="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-1">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
+          </div>
+          <span class="text-emerald-400 font-bold text-base">Connected & Authenticated</span>
+          <span class="text-zinc-400 text-xs text-center max-w-xs">WhatsApp socket is actively linked. You can now dispatch messages.</span>
+        `;
         badge.textContent = 'Active & Connected';
-        badge.className = 'px-3 py-1 rounded-full text-xs font-medium badge-online';
-        if (qrPollInterval) clearInterval(qrPollInterval);
+        badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-medium badge-online';
+        if (qrPollInterval) {
+          clearInterval(qrPollInterval);
+          qrPollInterval = null;
+        }
         loadSessions();
       } else if (data.qrDataUrl) {
         img.src = data.qrDataUrl;
         img.classList.remove('hidden');
         placeholder.classList.add('hidden');
-        actions.classList.remove('hidden');
         badge.textContent = 'Scan QR Code';
-        badge.className = 'px-3 py-1 rounded-full text-xs font-medium badge-qr';
+        badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-medium badge-qr';
       } else {
         img.classList.add('hidden');
         placeholder.classList.remove('hidden');
-        placeholder.textContent = data.message || 'Generating QR code string...';
-        actions.classList.remove('hidden');
+        placeholder.innerHTML = `
+          <svg class="w-7 h-7 text-amber-400 animate-spin mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          <span class="text-zinc-300 font-medium">${data.message || 'Generating QR string...'}</span>
+          <span class="text-zinc-500 text-[11px]">Connecting Baileys engine</span>
+        `;
         badge.textContent = data.status || 'Waiting';
-        badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-zinc-800 text-zinc-400';
+        badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-400';
       }
+    }
+
+    async function requestPairingCode() {
+      const sessionInput = document.getElementById('pair-code-session');
+      const phoneInput = document.getElementById('pair-code-phone');
+      const sessionId = sessionInput.value.trim() || 'tenant-botla-1';
+      const phoneNumber = phoneInput.value.trim().replace(/[^0-9]/g, '');
+      const status = document.getElementById('pair-code-status');
+      const resultBox = document.getElementById('pair-code-result-box');
+      const codeDisplay = document.getElementById('pair-code-display');
+      const btn = document.getElementById('btn-pair-code');
+
+      if (!phoneNumber || phoneNumber.length < 7) {
+        status.textContent = 'Please enter valid phone number with country code.';
+        status.className = 'text-xs text-rose-400 text-center';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = `<svg class="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>`;
+      status.textContent = 'Requesting pairing code from WhatsApp socket...';
+      status.className = 'text-xs text-amber-400 text-center';
+
+      try {
+        const res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/pair-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phoneNumber }),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.success && data.code) {
+          resultBox.classList.remove('hidden');
+          codeDisplay.textContent = data.code;
+          status.textContent = '✓ Pairing code received! Enter it on your phone.';
+          status.className = 'text-xs text-emerald-400 text-center';
+          showToast('Pairing code generated');
+        } else {
+          resultBox.classList.add('hidden');
+          status.textContent = 'Failed: ' + (data.message || 'Unable to generate code');
+          status.className = 'text-xs text-rose-400 text-center';
+          showToast(data.message || 'Pairing code failed', 'error');
+        }
+      } catch (err) {
+        status.textContent = 'Request error: ' + err.message;
+        status.className = 'text-xs text-rose-400 text-center';
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<span>Get Code</span>`;
+        fetchEvents();
+      }
+    }
+
+    function copyPairCode() {
+      const code = document.getElementById('pair-code-display').textContent.trim();
+      if (!code || code === '----') return;
+      navigator.clipboard.writeText(code).then(() => {
+        showToast('Pairing code copied to clipboard!');
+      }).catch(() => {
+        showToast('Failed to copy', 'error');
+      });
+    }
+
+    // ==========================================
+    // Outbound Message & Media Dispatcher
+    // ==========================================
+    function switchSendTab(tab) {
+      const textForm = document.getElementById('send-form');
+      const mediaForm = document.getElementById('send-media-form');
+      const btnText = document.getElementById('tab-btn-text');
+      const btnMedia = document.getElementById('tab-btn-media');
+
+      if (tab === 'text') {
+        textForm.classList.remove('hidden');
+        mediaForm.classList.add('hidden');
+        btnText.className = 'px-3.5 py-2 rounded-xl text-xs font-semibold bg-zinc-800 text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5';
+        btnMedia.className = 'px-3.5 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5';
+      } else {
+        textForm.classList.add('hidden');
+        mediaForm.classList.remove('hidden');
+        btnMedia.className = 'px-3.5 py-2 rounded-xl text-xs font-semibold bg-zinc-800 text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5';
+        btnText.className = 'px-3.5 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5';
+      }
+    }
+
+    function toggleMediaFields() {
+      const type = document.getElementById('media-type').value;
+      const pttContainer = document.getElementById('ptt-container');
+      const captionContainer = document.getElementById('caption-container');
+      const filenameContainer = document.getElementById('filename-container');
+
+      if (type === 'audio') {
+        pttContainer.classList.remove('hidden');
+        captionContainer.classList.add('hidden');
+        filenameContainer.classList.add('hidden');
+      } else if (type === 'document') {
+        pttContainer.classList.add('hidden');
+        captionContainer.classList.remove('hidden');
+        filenameContainer.classList.remove('hidden');
+      } else {
+        // image
+        pttContainer.classList.add('hidden');
+        captionContainer.classList.remove('hidden');
+        filenameContainer.classList.add('hidden');
+      }
+    }
+
+    function setSendTemplate(text) {
+      document.getElementById('send-text').value = text;
     }
 
     async function handleSendMessage(e) {
@@ -304,8 +1121,14 @@
       const statusSpan = document.getElementById('send-status');
       const btn = document.getElementById('btn-send');
 
+      if (!sessionId || !jid || !text) return;
+
       btn.disabled = true;
-      statusSpan.textContent = 'Simulating human composing (600-1400ms)...';
+      btn.innerHTML = `
+        <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        <span>Simulating Presence...</span>
+      `;
+      statusSpan.textContent = 'Simulating composing presence (600-1400ms)...';
       statusSpan.className = 'text-xs text-amber-400';
 
       try {
@@ -314,81 +1137,280 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ jid, text })
         });
-        const contentType = res.headers.get('content-type') || '';
-        let data = {};
-        if (contentType.includes('application/json')) {
-          data = await res.json();
-        }
+        const data = await res.json().catch(() => ({}));
 
         if (res.ok && data.success) {
-          statusSpan.textContent = '✓ Message sent! ID: ' + data.messageId;
+          statusSpan.textContent = '✓ Message dispatched! ID: ' + (data.messageId || 'ok');
           statusSpan.className = 'text-xs text-emerald-400';
+          showToast('Message dispatched via WhatsApp socket');
           document.getElementById('send-text').value = '';
         } else {
           statusSpan.textContent = 'Error: ' + (data.message || 'Failed to send');
           statusSpan.className = 'text-xs text-rose-400';
+          showToast(data.message || 'Failed to send message', 'error');
         }
       } catch (err) {
         statusSpan.textContent = 'Request failed: ' + err.message;
         statusSpan.className = 'text-xs text-rose-400';
+        showToast('Send error: ' + err.message, 'error');
       } finally {
         btn.disabled = false;
+        btn.innerHTML = `
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+          <span>Send via Gateway</span>
+        `;
         fetchEvents();
       }
     }
 
-    async function deleteSession(sessionId) {
-      if (!confirm('Are you sure you want to disconnect and purge session ' + sessionId + '?')) return;
+    async function handleSendMedia(e) {
+      e.preventDefault();
+      const sessionId = document.getElementById('media-session-id').value.trim();
+      const jid = document.getElementById('media-jid').value.trim();
+      const type = document.getElementById('media-type').value;
+      const url = document.getElementById('media-url').value.trim();
+      const caption = document.getElementById('media-caption').value.trim();
+      const filename = document.getElementById('media-filename').value.trim();
+      const ptt = document.getElementById('media-ptt').checked;
+      const statusSpan = document.getElementById('send-media-status');
+      const btn = document.getElementById('btn-send-media');
+
+      if (!sessionId || !jid || !url) return;
+
+      btn.disabled = true;
+      btn.innerHTML = `
+        <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        <span>Dispatching Media...</span>
+      `;
+      statusSpan.textContent = `Simulating ${type === 'audio' && ptt ? 'recording' : 'composing'} presence & dispatching...`;
+      statusSpan.className = 'text-xs text-amber-400';
+
       try {
-        await fetch('/api/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
-        if (activeQrSession === sessionId) {
-          activeQrSession = null;
-          document.getElementById('qr-session-label').textContent = 'No session selected';
-          document.getElementById('qr-image').classList.add('hidden');
-          document.getElementById('qr-placeholder').classList.remove('hidden');
-          document.getElementById('qr-placeholder').textContent = 'Session deleted.';
-          document.getElementById('qr-actions').classList.add('hidden');
+        const payload = {
+          jid,
+          type,
+          url,
+          caption: caption || undefined,
+          filename: filename || undefined,
+          ptt: !!ptt,
+        };
+
+        const res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/send-media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.success) {
+          statusSpan.textContent = `✓ Media (${type}) dispatched! ID: ${data.messageId}`;
+          statusSpan.className = 'text-xs text-emerald-400';
+          showToast(`Media (${type}) dispatched successfully!`);
+        } else {
+          statusSpan.textContent = 'Error: ' + (data.error || 'Failed to dispatch media');
+          statusSpan.className = 'text-xs text-rose-400';
+          showToast(data.error || 'Media dispatch failed', 'error');
         }
-        loadSessions();
-        fetchEvents();
       } catch (err) {
-        console.warn('Error deleting session', err);
+        statusSpan.textContent = 'Request failed: ' + err.message;
+        statusSpan.className = 'text-xs text-rose-400';
+        showToast('Request failed: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+          <span>Dispatch Media</span>
+        `;
+        fetchEvents();
       }
+    }
+
+    // ==========================================
+    // Realtime Activity Stream & Events
+    // ==========================================
+    function getRelativeTime(timestamp) {
+      if (!timestamp) return '';
+      const diffSec = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
+      if (isNaN(diffSec) || diffSec < 4) return 'just now';
+      if (diffSec < 60) return `${diffSec}s ago`;
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return `${diffMin}m ago`;
+      const diffHr = Math.floor(diffMin / 60);
+      if (diffHr < 24) return `${diffHr}h ago`;
+      return `${Math.floor(diffHr / 24)}d ago`;
+    }
+
+    function toggleStreamPause() {
+      streamPaused = !streamPaused;
+      const btn = document.getElementById('btn-stream-pause');
+      if (streamPaused) {
+        btn.textContent = 'Resume';
+        btn.className = 'px-2.5 py-1 text-[11px] rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 transition cursor-pointer';
+        showToast('Event stream paused');
+      } else {
+        btn.textContent = 'Pause';
+        btn.className = 'px-2.5 py-1 text-[11px] rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition cursor-pointer';
+        fetchEvents();
+      }
+    }
+
+    function clearEventFeed() {
+      cachedEventsList = [];
+      renderEvents();
+      showToast('Event feed cleared');
+    }
+
+    function setEventFilter(filter) {
+      currentEventFilter = filter;
+      document.querySelectorAll('.event-filter-btn').forEach(btn => {
+        if (btn.getAttribute('data-filter') === filter) {
+          btn.className = 'event-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 text-white font-medium whitespace-nowrap cursor-pointer';
+        } else {
+          btn.className = 'event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer';
+        }
+      });
+      renderEvents();
     }
 
     async function fetchEvents() {
+      if (streamPaused) return;
       const data = await safeFetchJson('/api/events');
-      if (!data || !data.events || data.events.length === 0) return;
+      if (!data || !data.events) return;
+      cachedEventsList = data.events;
+      renderEvents();
+    }
 
+    function renderEvents() {
       const feed = document.getElementById('events-feed');
-      feed.innerHTML = data.events.slice(0, 15).map(ev => {
-        let color = 'text-zinc-400';
-        if (ev.type === 'inbound_message') color = 'text-cyan-400';
-        else if (ev.type === 'outbound_message') color = 'text-emerald-400';
-        else if (ev.type === 'webhook_dispatched') color = 'text-indigo-400';
-        else if (ev.type === 'webhook_failed') color = 'text-rose-400';
-        else if (ev.type === 'session_event') color = 'text-amber-400';
+      const counter = document.getElementById('stream-counter');
+      const autoscroll = document.getElementById('stream-autoscroll').checked;
 
-        const time = new Date(ev.timestamp).toLocaleTimeString();
+      let filtered = cachedEventsList;
+      if (currentEventFilter === 'inbound_message') {
+        filtered = cachedEventsList.filter(e => e.type.includes('inbound'));
+      } else if (currentEventFilter === 'outbound_message') {
+        filtered = cachedEventsList.filter(e => e.type.includes('outbound'));
+      } else if (currentEventFilter === 'webhook') {
+        filtered = cachedEventsList.filter(e => e.type.includes('webhook'));
+      } else if (currentEventFilter === 'session_event') {
+        filtered = cachedEventsList.filter(e => e.type.includes('session'));
+      }
+
+      counter.textContent = `${filtered.length} events logged`;
+
+      if (filtered.length === 0) {
+        feed.innerHTML = `
+          <div class="text-zinc-600 text-center py-12 text-xs">
+            No events matching '${currentEventFilter}'.
+          </div>
+        `;
+        return;
+      }
+
+      feed.innerHTML = filtered.slice(0, 40).map((ev, index) => {
+        let badgeColor = 'bg-zinc-800 text-zinc-300 border-zinc-700';
+        let typeIcon = '⚡';
+
+        if (ev.type === 'inbound_message') {
+          badgeColor = 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30';
+          typeIcon = '📥';
+        } else if (ev.type === 'outbound_message') {
+          badgeColor = 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+          typeIcon = '📤';
+        } else if (ev.type === 'webhook_dispatched') {
+          badgeColor = 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30';
+          typeIcon = '🔗';
+        } else if (ev.type === 'webhook_failed') {
+          badgeColor = 'bg-rose-500/15 text-rose-400 border-rose-500/30';
+          typeIcon = '❌';
+        } else if (ev.type === 'session_event') {
+          badgeColor = 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+          typeIcon = '⚙️';
+        }
+
+        const relTime = getRelativeTime(ev.timestamp);
+        const clockTime = new Date(ev.timestamp).toLocaleTimeString();
+        const jsonString = JSON.stringify(ev.details || {}, null, 2);
+        const safeEscapedJson = jsonString.replace(/"/g, '&quot;');
+
+        // Create brief summary
+        let summary = '';
+        if (ev.details) {
+          if (ev.details.text) summary = ev.details.text;
+          else if (ev.details.status) summary = `Status changed to ${ev.details.status}`;
+          else if (ev.details.mediaType) summary = `Media: ${ev.details.mediaType}`;
+          else if (ev.details.message) summary = ev.details.message;
+          else summary = JSON.stringify(ev.details).substring(0, 60);
+        }
+
         return `
-          <div class="p-2 rounded bg-zinc-950/80 border border-zinc-900 flex flex-col gap-0.5">
-            <div class="flex items-center justify-between text-[11px]">
-              <span class="${color} font-semibold">[${ev.type}]</span>
-              <span class="text-zinc-600">${time}</span>
+          <div class="p-3 rounded-xl bg-zinc-950/80 border border-zinc-900/90 hover:border-zinc-800 transition-colors space-y-1.5">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span class="text-xs">${typeIcon}</span>
+                <span class="px-2 py-0.5 rounded-md text-[10px] font-mono border font-semibold ${badgeColor}">
+                  ${ev.type}
+                </span>
+                ${ev.sessionId ? `<span class="text-[10px] font-mono text-zinc-400 truncate max-w-[100px]">[${ev.sessionId}]</span>` : ''}
+              </div>
+
+              <span class="text-[10px] text-zinc-500 font-mono flex-shrink-0" title="${clockTime}">${relTime}</span>
             </div>
-            <div class="text-zinc-400 truncate">
-              ${ev.sessionId ? 'Session: ' + ev.sessionId + ' | ' : ''}${JSON.stringify(ev.details)}
-            </div>
+
+            ${summary ? `<div class="text-zinc-300 text-xs truncate font-sans">${summary}</div>` : ''}
+
+            <!-- Expandable JSON Payload Accordion -->
+            <details class="group">
+              <summary class="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer flex items-center justify-between font-mono select-none pt-1">
+                <span class="flex items-center gap-1">
+                  <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                  <span>JSON Payload</span>
+                </span>
+                <button type="button" onclick="copyEventPayload(event, ${index})" class="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700">
+                  Copy
+                </button>
+              </summary>
+              <pre id="event-json-${index}" class="mt-1.5 p-2 rounded-lg bg-black/70 border border-zinc-900 text-[10px] text-zinc-300 overflow-x-auto font-mono whitespace-pre max-h-36 overflow-y-auto">${jsonString}</pre>
+            </details>
           </div>
         `;
       }).join('');
+
+      if (autoscroll) {
+        feed.scrollTop = 0;
+      }
     }
 
-    // Initialize UI on load
+    function copyEventPayload(event, index) {
+      event.stopPropagation();
+      event.preventDefault();
+      const el = document.getElementById(`event-json-${index}`);
+      if (!el) return;
+      navigator.clipboard.writeText(el.textContent).then(() => {
+        showToast('Payload copied to clipboard');
+      }).catch(() => {
+        showToast('Failed to copy', 'error');
+      });
+    }
+
+    async function manualRefreshAll() {
+      const spinner = document.getElementById('refresh-spinner');
+      spinner.classList.add('animate-spin');
+      await Promise.all([checkHealth(), loadSessions(), fetchEvents()]);
+      setTimeout(() => spinner.classList.remove('animate-spin'), 600);
+      showToast('Gateway data refreshed');
+    }
+
+    // ==========================================
+    // Lifecycle Initialization
+    // ==========================================
     checkHealth();
     loadSessions();
     fetchEvents();
-    setInterval(fetchEvents, 2000);
+
+    setInterval(fetchEvents, 2500);
+    setInterval(checkHealth, 10000);
+    setInterval(loadSessions, 15000);
   </script>
 </body>
 </html>

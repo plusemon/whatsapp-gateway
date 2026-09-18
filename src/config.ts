@@ -10,6 +10,7 @@ dotenv.config();
 export interface GatewayConfig {
   port: number;
   host: string;
+  publicUrl: string;
   redisUrl: string;
   botlaWebhookUrl: string;
   webhookSecret: string;
@@ -19,11 +20,23 @@ export interface GatewayConfig {
 export const config: GatewayConfig = {
   port: parseInt(process.env.PORT || '3000', 10),
   host: process.env.HOST || '0.0.0.0',
+  publicUrl: process.env.PUBLIC_URL || process.env.BASE_URL || '',
   redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
   botlaWebhookUrl: process.env.BOTLA_WEBHOOK_URL || 'http://127.0.0.1:8000/api/whatsapp/webhook',
   webhookSecret: process.env.WEBHOOK_SECRET || 'your_hmac_secret_here',
   logLevel: process.env.LOG_LEVEL || 'info',
 };
+
+/**
+ * Returns the canonical public base URL used for media access URLs.
+ */
+export function getPublicBaseUrl(): string {
+  if (config.publicUrl) {
+    return config.publicUrl.replace(/\/$/, '');
+  }
+  const host = config.host === '0.0.0.0' ? '127.0.0.1' : config.host;
+  return `http://${host}:${config.port}`;
+}
 
 export const logger = pino({
   level: config.logLevel,
@@ -136,3 +149,29 @@ export async function getRedisClient(): Promise<Redis> {
 export function isUsingMockRedis(): boolean {
   return isMockRedis;
 }
+
+/**
+ * Disconnects the Redis client cleanly during graceful shutdown.
+ */
+export async function disconnectRedisClient(): Promise<void> {
+  if (redisInstance) {
+    try {
+      if (typeof redisInstance.quit === 'function') {
+        await redisInstance.quit();
+      } else if (typeof redisInstance.disconnect === 'function') {
+        redisInstance.disconnect();
+      }
+      logger.info('[Redis] Redis client disconnected cleanly');
+    } catch {
+      try {
+        if (typeof redisInstance.disconnect === 'function') {
+          redisInstance.disconnect();
+        }
+      } catch {
+        // ignore
+      }
+    }
+    redisInstance = null;
+  }
+}
+

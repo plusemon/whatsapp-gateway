@@ -1,13 +1,17 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { Boom } from '@hapi/boom';
 import makeWASocket, {
   DisconnectReason,
+  downloadMediaMessage,
   proto,
   WASocket,
 } from '@whiskeysockets/baileys';
 import { clearRedisSession, useRedisAuthState } from '../auth/redisAuthState.js';
-import { config, getRedisClient, logger } from '../config.js';
+import { config, getPublicBaseUrl, getRedisClient, logger } from '../config.js';
 import type {
+  InboundMediaMetadata,
   SessionMetadata,
   SessionStatus,
   SessionSummary,
@@ -247,6 +251,67 @@ export class SessionManager {
 
           const extractedText = this.extractMessageText(msg);
 
+          // Detect if message contains media attachments (image, audio, document, video)
+          const mediaInfo = this.detectInboundMedia(msg);
+          let inboundMedia: InboundMediaMetadata | null = null;
+
+          if (mediaInfo) {
+            try {
+              const buffer = await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+                {
+                  logger: baileysLogger,
+                  reuploadRequest: (update) => sock.updateMediaMessage(update),
+                }
+              );
+
+              if (buffer && buffer.length > 0) {
+                const messageId = msg.key.id || crypto.randomUUID();
+                const ext = this.getMediaExtension(
+                  mediaInfo.mimetype,
+                  mediaInfo.filename,
+                  mediaInfo.type === 'image' ? 'jpg' : (mediaInfo.type === 'audio' ? 'ogg' : (mediaInfo.type === 'video' ? 'mp4' : 'bin'))
+                );
+
+                const storageDir = path.resolve(process.cwd(), 'storage/media', sessionId);
+                await fs.promises.mkdir(storageDir, { recursive: true });
+
+                const fileNameOnDisk = `${messageId}.${ext}`;
+                const filePath = path.join(storageDir, fileNameOnDisk);
+                await fs.promises.writeFile(filePath, buffer);
+
+                const mediaAccessUrl = `${getPublicBaseUrl()}/media/${encodeURIComponent(sessionId)}/${fileNameOnDisk}`;
+
+                inboundMedia = {
+                  url: mediaAccessUrl,
+                  mimetype: mediaInfo.mimetype,
+                  fileSize: buffer.length,
+                  caption: mediaInfo.caption,
+                  type: mediaInfo.type,
+                  filename: mediaInfo.filename || fileNameOnDisk,
+                };
+
+                logger.info(
+                  {
+                    sessionId,
+                    messageId,
+                    type: mediaInfo.type,
+                    fileSize: buffer.length,
+                    url: mediaAccessUrl,
+                  },
+                  '[SessionManager] Inbound media extracted, stored and URL generated'
+                );
+              }
+            } catch (mediaErr: any) {
+              logger.error(
+                { sessionId, err: mediaErr.message, type: mediaInfo.type },
+                '[SessionManager] Failed to download inbound media attachment'
+              );
+            }
+          }
+
           const payload: WebhookInboundPayload = {
             sessionId,
             message: {
@@ -254,6 +319,7 @@ export class SessionManager {
               pushName: msg.pushName || null,
               text: extractedText,
               raw: msg,
+              media: inboundMedia,
             },
           };
 
@@ -261,6 +327,14 @@ export class SessionManager {
             from: msg.key.remoteJid,
             pushName: msg.pushName,
             text: extractedText,
+            media: inboundMedia
+              ? {
+                  type: inboundMedia.type,
+                  url: inboundMedia.url,
+                  fileSize: inboundMedia.fileSize,
+                  filename: inboundMedia.filename,
+                }
+              : undefined,
           });
 
           // Post asynchronously to configured Laravel webhook
@@ -276,6 +350,111 @@ export class SessionManager {
       logger.error({ sessionId, err: err.message }, '[SessionManager] Failed to initialize session');
       throw err;
     }
+  }
+
+  /**
+   * Helper to detect and extract media metadata from inbound WhatsApp messages.
+   * Handles direct media messages as well as ephemeral, view-once, and captioned document envelopes.
+   */
+  public detectInboundMedia(msg: proto.IWebMessageInfo): {
+    type: 'image' | 'audio' | 'document' | 'video';
+    mimetype: string;
+    caption: string | null;
+    filename: string | null;
+    fileLength: number;
+  } | null {
+    let m = msg.message;
+    if (!m) return null;
+
+    if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+    if (m.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+    if (m.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+    if (m.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+
+    if (m.imageMessage) {
+      return {
+        type: 'image',
+        mimetype: m.imageMessage.mimetype || 'image/jpeg',
+        caption: m.imageMessage.caption || null,
+        filename: null,
+        fileLength: Number(m.imageMessage.fileLength || 0),
+      };
+    }
+    if (m.audioMessage) {
+      return {
+        type: 'audio',
+        mimetype: m.audioMessage.mimetype || 'audio/ogg',
+        caption: null,
+        filename: null,
+        fileLength: Number(m.audioMessage.fileLength || 0),
+      };
+    }
+    if (m.documentMessage) {
+      return {
+        type: 'document',
+        mimetype: m.documentMessage.mimetype || 'application/octet-stream',
+        caption: m.documentMessage.caption || null,
+        filename: m.documentMessage.fileName || null,
+        fileLength: Number(m.documentMessage.fileLength || 0),
+      };
+    }
+    if (m.videoMessage) {
+      return {
+        type: 'video',
+        mimetype: m.videoMessage.mimetype || 'video/mp4',
+        caption: m.videoMessage.caption || null,
+        filename: null,
+        fileLength: Number(m.videoMessage.fileLength || 0),
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Helper to infer an appropriate file extension from mimetype or original filename.
+   */
+  public getMediaExtension(
+    mimetype?: string | null,
+    originalFileName?: string | null,
+    defaultExt: string = 'bin'
+  ): string {
+    if (originalFileName) {
+      const ext = path.extname(originalFileName).replace('.', '').toLowerCase();
+      if (ext && ext.length >= 1 && ext.length <= 8) return ext;
+    }
+    if (!mimetype) return defaultExt;
+
+    const cleanMime = mimetype.split(';')[0].trim().toLowerCase();
+    const mimeMap: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/jpg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+      'audio/ogg': 'ogg',
+      'audio/mpeg': 'mp3',
+      'audio/mp4': 'm4a',
+      'audio/aac': 'aac',
+      'audio/wav': 'wav',
+      'video/mp4': 'mp4',
+      'video/3gpp': '3gp',
+      'video/quicktime': 'mov',
+      'application/pdf': 'pdf',
+      'application/msword': 'doc',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+      'application/vnd.ms-excel': 'xls',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+      'application/zip': 'zip',
+      'text/plain': 'txt',
+      'text/csv': 'csv',
+    };
+
+    if (mimeMap[cleanMime]) return mimeMap[cleanMime];
+    const sub = cleanMime.split('/')[1];
+    if (sub && /^[a-z0-9]{2,6}$/.test(sub)) return sub;
+
+    return defaultExt;
   }
 
   /**
@@ -454,6 +633,242 @@ export class SessionManager {
       createdAt: m.createdAt,
       lastActiveAt: m.lastActiveAt,
     }));
+  }
+
+  /**
+   * Automatically restores all active sessions from Redis credentials on server boot.
+   * Queries `wa:session:*:creds`, extracts unique session IDs, and sequentially boots each socket.
+   * A failure in one session recovery does not block or crash remaining sessions.
+   */
+  public async restoreAllSessions(): Promise<void> {
+    try {
+      const redis = await getRedisClient();
+      logger.info('[SessionManager] Querying Redis for active sessions to auto-restore (pattern: wa:session:*:creds)...');
+
+      let keys: string[] = [];
+      try {
+        keys = await redis.keys('wa:session:*:creds');
+      } catch (err: any) {
+        logger.warn({ err: err.message }, '[SessionManager] Failed to query Redis keys for auto-restore');
+        return;
+      }
+
+      if (!keys || keys.length === 0) {
+        logger.info('[SessionManager] No previous session credentials found in Redis for auto-restore.');
+        return;
+      }
+
+      // Extract unique sessionIds
+      const sessionIds = new Set<string>();
+      for (const key of keys) {
+        const match = key.match(/^wa:session:(.+):creds$/);
+        if (match && match[1]) {
+          sessionIds.add(match[1]);
+        }
+      }
+
+      logger.info(
+        { count: sessionIds.size, sessions: Array.from(sessionIds) },
+        `[SessionManager] Found ${sessionIds.size} existing session(s). Sequentially auto-restoring in background...`
+      );
+
+      for (const sessionId of sessionIds) {
+        try {
+          logger.info({ sessionId }, '[SessionManager] Auto-restoring session...');
+          await this.initSession(sessionId);
+          logger.info({ sessionId }, '[SessionManager] Successfully auto-restored session');
+        } catch (sessionErr: any) {
+          logger.error(
+            { sessionId, err: sessionErr.message },
+            '[SessionManager] Failed to auto-restore session; skipping to next'
+          );
+        }
+      }
+
+      logger.info('[SessionManager] Session auto-restore sequence finished.');
+    } catch (err: any) {
+      logger.error({ err: err.message }, '[SessionManager] Error executing restoreAllSessions');
+    }
+  }
+
+  /**
+   * Requests an 8-character pairing code for phone number pairing (alternative to QR scanning).
+   * Formats the pairing code with hyphen (e.g., ABCD-1234).
+   */
+  public async requestPairingCode(sessionId: string, phoneNumber: string): Promise<string> {
+    let sock = this.activeSockets.get(sessionId);
+    let meta = this.metadataMap.get(sessionId);
+
+    // If socket not initialized yet, initialize it
+    if (!sock || !meta) {
+      meta = await this.initSession(sessionId);
+      sock = this.activeSockets.get(sessionId);
+    }
+
+    if (!sock) {
+      throw new Error(`Failed to initialize session '${sessionId}' for pairing code`);
+    }
+
+    // Clean and validate phone number (digits only)
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 8) {
+      throw new Error('Invalid phone number. Must include country code and digits (e.g. 88017xxxxxxxx).');
+    }
+
+    // Verify session is not already registered
+    if (sock.authState?.creds?.registered) {
+      throw new Error(`Session '${sessionId}' is already registered and authenticated.`);
+    }
+
+    logger.info({ sessionId, phoneNumber: cleanPhone }, '[SessionManager] Requesting pairing code from WhatsApp...');
+    const rawCode = await sock.requestPairingCode(cleanPhone);
+
+    if (!rawCode) {
+      throw new Error('WhatsApp did not return a pairing code. Please retry.');
+    }
+
+    // Format with hyphen: e.g. ABCD-1234
+    const cleanCode = rawCode.replace(/[^A-Za-z0-9]/g, '');
+    const formattedCode = cleanCode.length === 8
+      ? `${cleanCode.slice(0, 4)}-${cleanCode.slice(4)}`
+      : (rawCode.includes('-') ? rawCode : (rawCode.match(/.{1,4}/g)?.join('-') || rawCode));
+
+    logger.info({ sessionId, code: formattedCode }, '[SessionManager] Pairing code generated successfully');
+
+    this.logEvent('session_event', sessionId, {
+      action: 'pairing_code_generated',
+      phoneNumber: cleanPhone,
+      code: formattedCode,
+    });
+
+    return formattedCode;
+  }
+
+  /**
+   * Dispatches an outbound media message (image, audio, or document) with human presence simulation.
+   */
+  public async sendMedia(
+    sessionId: string,
+    jid: string,
+    type: 'image' | 'audio' | 'document',
+    url: string,
+    options?: {
+      caption?: string;
+      filename?: string;
+      ptt?: boolean;
+    }
+  ): Promise<{ messageId: string; timestamp: number }> {
+    const sock = this.activeSockets.get(sessionId);
+    const meta = this.metadataMap.get(sessionId);
+
+    if (!sock || meta?.status !== 'connected') {
+      throw new Error(`Session '${sessionId}' is not active or connected to WhatsApp`);
+    }
+
+    // Normalize target JID
+    let targetJid = jid.trim();
+    if (!targetJid.includes('@')) {
+      targetJid = `${targetJid}@s.whatsapp.net`;
+    }
+
+    // Anti-ban simulation: composing or recording presence
+    const presenceType = type === 'audio' && options?.ptt ? 'recording' : 'composing';
+    await sock.sendPresenceUpdate(presenceType, targetJid);
+
+    const delay = Math.floor(Math.random() * (1400 - 600 + 1)) + 600;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+
+    await sock.sendPresenceUpdate('paused', targetJid);
+
+    // Build media payload for Baileys
+    let messagePayload: any = {};
+    if (type === 'image') {
+      messagePayload = {
+        image: { url },
+        caption: options?.caption || undefined,
+      };
+    } else if (type === 'audio') {
+      messagePayload = {
+        audio: { url },
+        ptt: !!options?.ptt,
+        mimetype: options?.ptt ? 'audio/ogg; codecs=opus' : 'audio/mp4',
+      };
+    } else if (type === 'document') {
+      messagePayload = {
+        document: { url },
+        fileName: options?.filename || 'document.pdf',
+        caption: options?.caption || undefined,
+      };
+    } else {
+      throw new Error(`Unsupported media type: ${type}`);
+    }
+
+    let sendResult: any;
+    try {
+      sendResult = await sock.sendMessage(targetJid, messagePayload);
+    } catch (directErr: any) {
+      // Fallback: fetch media buffer directly and dispatch with Buffer
+      logger.warn(
+        { sessionId, type, url, err: directErr.message },
+        '[SessionManager] Direct URL dispatch failed; fetching media buffer as fallback'
+      );
+      const fetchRes = await fetch(url, { signal: AbortSignal.timeout(20000) });
+      if (!fetchRes.ok) {
+        throw new Error(`Failed to fetch media from URL (${fetchRes.status}: ${fetchRes.statusText})`);
+      }
+      const arrayBuffer = await fetchRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const fallbackMime = fetchRes.headers.get('content-type') || undefined;
+
+      const fallbackPayload = {
+        ...messagePayload,
+        [type]: buffer,
+        ...(fallbackMime ? { mimetype: fallbackMime } : {}),
+      };
+      sendResult = await sock.sendMessage(targetJid, fallbackPayload);
+    }
+
+    const messageId = sendResult?.key?.id || crypto.randomUUID();
+
+    logger.info(
+      { sessionId, jid: targetJid, type, messageId, delayMs: delay },
+      '[SessionManager] Outbound media dispatched successfully'
+    );
+
+    this.logEvent('outbound_message', sessionId, {
+      jid: targetJid,
+      messageId,
+      type,
+      mediaUrl: url,
+      caption: options?.caption,
+      filename: options?.filename,
+      ptt: options?.ptt,
+      simulatedDelayMs: delay,
+    });
+
+    return {
+      messageId,
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * Gracefully closes all active WASocket connections without clearing Redis persistence keys.
+   */
+  public async closeAllSessions(): Promise<void> {
+    const count = this.activeSockets.size;
+    logger.info({ count }, '[SessionManager] Gracefully closing all active WASockets without purging Redis keys...');
+
+    for (const [sessionId, sock] of this.activeSockets.entries()) {
+      try {
+        sock.end(undefined);
+      } catch (err: any) {
+        logger.warn({ sessionId, err: err.message }, '[SessionManager] Warning while closing socket');
+      }
+    }
+
+    this.activeSockets.clear();
+    logger.info('[SessionManager] All active sockets closed.');
   }
 
   /**

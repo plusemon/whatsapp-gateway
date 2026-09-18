@@ -1,15 +1,23 @@
 import fs from 'fs';
 import path from 'path';
 import cors from '@fastify/cors';
-import Fastify from 'fastify';
-import { config, getRedisClient, isUsingMockRedis, logger } from './config.js';
+import fastifyStatic from '@fastify/static';
+import Fastify, { FastifyInstance } from 'fastify';
+import {
+  config,
+  disconnectRedisClient,
+  getPublicBaseUrl,
+  getRedisClient,
+  isUsingMockRedis,
+  logger,
+} from './config.js';
 import { sessionManager } from './manager/sessionManager.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
 
 /**
  * Builds and starts the Fastify WhatsApp Gateway Microservice.
  */
-export async function buildServer() {
+export async function buildServer(): Promise<FastifyInstance> {
   const fastify = Fastify({
     logger: false, // Managed via custom pino logger in config
     trustProxy: true,
@@ -21,6 +29,19 @@ export async function buildServer() {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   });
 
+  // Ensure media storage directory exists
+  const mediaStoragePath = path.resolve(process.cwd(), 'storage/media');
+  if (!fs.existsSync(mediaStoragePath)) {
+    fs.mkdirSync(mediaStoragePath, { recursive: true });
+  }
+
+  // Register static file serving for downloaded inbound & local outbound media files
+  await fastify.register(fastifyStatic, {
+    root: mediaStoragePath,
+    prefix: '/media/',
+    decorateReply: false,
+  });
+
   // Health check endpoints
   fastify.get('/api/health', async () => {
     return {
@@ -29,6 +50,7 @@ export async function buildServer() {
       version: '1.0.0',
       uptimeSeconds: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
+      publicBaseUrl: getPublicBaseUrl(),
       redis: isUsingMockRedis() ? 'in-memory-fallback' : 'connected-redis',
       webhookUrl: config.botlaWebhookUrl,
       activeSessions: sessionManager.listSessions().length,
@@ -114,6 +136,53 @@ export async function start() {
       { port: config.port, host: config.host },
       `[Server] Botla WhatsApp Gateway running on http://${config.host}:${config.port}`
     );
+
+    // Auto-Restore previous sessions from Redis credentials in the background
+    sessionManager.restoreAllSessions().catch((restoreErr: any) => {
+      logger.error(
+        { err: restoreErr.message },
+        '[Server] Background session auto-restore encountered an error'
+      );
+    });
+
+    // Graceful process shutdown orchestration
+    let isShuttingDown = false;
+    const shutdown = async (signal: string) => {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
+
+      logger.info({ signal }, '[Server] Received shutdown signal. Initiating graceful termination...');
+
+      // Failsafe timeout to prevent hanging termination
+      const forceExitTimer = setTimeout(() => {
+        logger.error('[Server] Graceful shutdown timed out (10s). Forcing process exit.');
+        process.exit(1);
+      }, 10000);
+      forceExitTimer.unref();
+
+      try {
+        // 1. Close active Baileys sockets without purging Redis keys
+        await sessionManager.closeAllSessions();
+
+        // 2. Stop accepting incoming HTTP traffic & close Fastify
+        await server.close();
+        logger.info('[Server] Fastify HTTP server closed.');
+
+        // 3. Disconnect Redis connection cleanly
+        await disconnectRedisClient();
+
+        clearTimeout(forceExitTimer);
+        logger.info('[Server] Graceful termination complete. Exiting.');
+        process.exit(0);
+      } catch (err: any) {
+        logger.error({ err: err.message }, '[Server] Error during graceful shutdown');
+        process.exit(1);
+      }
+    };
+
+    process.once('SIGINT', () => shutdown('SIGINT'));
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
+
   } catch (err: any) {
     logger.error({ err: err.message }, '[Server] Fatal startup error');
     process.exit(1);

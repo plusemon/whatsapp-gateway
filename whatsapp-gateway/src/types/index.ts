@@ -44,6 +44,18 @@ export interface SessionSummary {
 }
 
 /**
+ * Inbound media metadata when an incoming WhatsApp message includes media attachments.
+ */
+export interface InboundMediaMetadata {
+  url: string;
+  mimetype: string;
+  fileSize: number;
+  caption?: string | null;
+  type: 'image' | 'audio' | 'document' | 'video';
+  filename?: string | null;
+}
+
+/**
  * Payload dispatched to the Botla Laravel webhook on inbound messages.
  */
 export interface WebhookInboundPayload {
@@ -53,6 +65,7 @@ export interface WebhookInboundPayload {
     pushName?: string | null;
     text: string;
     raw: proto.IWebMessageInfo;
+    media?: InboundMediaMetadata | null;
   };
 }
 
@@ -62,6 +75,25 @@ export interface WebhookInboundPayload {
 export interface SendMessageBody {
   jid: string;
   text: string;
+}
+
+/**
+ * Request payload for requesting pairing code.
+ */
+export interface PairCodeBody {
+  phoneNumber: string;
+}
+
+/**
+ * Request payload for sending outbound media.
+ */
+export interface SendMediaBody {
+  jid: string;
+  type: 'image' | 'audio' | 'document';
+  url: string;
+  caption?: string;
+  filename?: string;
+  ptt?: boolean;
 }
 
 /**
@@ -90,12 +122,29 @@ export interface ApiQrResponse {
   message?: string;
 }
 
+export interface ApiPairCodeResponse {
+  success: boolean;
+  sessionId: string;
+  code: string | null;
+  message: string;
+}
+
 export interface ApiSendResponse {
   success: boolean;
   sessionId: string;
   jid: string;
   messageId: string;
   timestamp: number;
+}
+
+export interface ApiSendMediaResponse {
+  success: boolean;
+  sessionId: string;
+  jid: string;
+  type: 'image' | 'audio' | 'document';
+  messageId: string;
+  timestamp: number;
+  error?: string;
 }
 
 export interface ApiDeleteResponse {

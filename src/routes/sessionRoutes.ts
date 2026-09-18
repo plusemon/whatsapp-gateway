@@ -4,8 +4,12 @@ import { sessionManager } from '../manager/sessionManager.js';
 import type {
   ApiDeleteResponse,
   ApiInitResponse,
+  ApiPairCodeResponse,
   ApiQrResponse,
+  ApiSendMediaResponse,
   ApiSendResponse,
+  PairCodeBody,
+  SendMediaBody,
   SendMessageBody,
   SessionParams,
 } from '../types/index.js';
@@ -210,6 +214,173 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           jid,
           messageId: '',
           timestamp: Date.now(),
+        });
+      }
+    }
+  );
+
+  /**
+   * 3b. POST /api/sessions/:id/pair-code
+   * Alternative to QR code: generates an 8-character pairing code for phone number pairing.
+   */
+  fastify.post<{
+    Params: SessionParams;
+    Body: PairCodeBody;
+    Reply: ApiPairCodeResponse;
+  }>(
+    '/sessions/:id/pair-code',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', minLength: 1 },
+          },
+        },
+        body: {
+          type: 'object',
+          required: ['phoneNumber'],
+          properties: {
+            phoneNumber: { type: 'string', minLength: 6 },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              sessionId: { type: 'string' },
+              code: { type: ['string', 'null'] },
+              message: { type: 'string' },
+            },
+          },
+          400: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              sessionId: { type: 'string' },
+              code: { type: ['string', 'null'] },
+              message: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params;
+      const { phoneNumber } = request.body;
+
+      try {
+        const formattedCode = await sessionManager.requestPairingCode(id, phoneNumber);
+        return reply.status(200).send({
+          success: true,
+          sessionId: id,
+          code: formattedCode,
+          message: 'Pairing code generated. Enter this code in WhatsApp > Linked Devices > Link with phone number.',
+        });
+      } catch (err: any) {
+        request.log.error({ sessionId: id, phoneNumber, err: err.message }, 'Failed to generate pairing code');
+        return reply.status(400).send({
+          success: false,
+          sessionId: id,
+          code: null,
+          message: err.message || 'Failed to request pairing code',
+        });
+      }
+    }
+  );
+
+  /**
+   * 3c. POST /api/sessions/:id/send-media
+   * Dispatches outbound media (image, audio, document) with presence simulation.
+   */
+  fastify.post<{
+    Params: SessionParams;
+    Body: SendMediaBody;
+    Reply: ApiSendMediaResponse;
+  }>(
+    '/sessions/:id/send-media',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', minLength: 1 },
+          },
+        },
+        body: {
+          type: 'object',
+          required: ['jid', 'type', 'url'],
+          properties: {
+            jid: { type: 'string', minLength: 3 },
+            type: { type: 'string', enum: ['image', 'audio', 'document'] },
+            url: { type: 'string', minLength: 4 },
+            caption: { type: 'string' },
+            filename: { type: 'string' },
+            ptt: { type: 'boolean' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              sessionId: { type: 'string' },
+              jid: { type: 'string' },
+              type: { type: 'string' },
+              messageId: { type: 'string' },
+              timestamp: { type: 'number' },
+            },
+          },
+          400: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              sessionId: { type: 'string' },
+              jid: { type: 'string' },
+              type: { type: 'string' },
+              messageId: { type: 'string' },
+              timestamp: { type: 'number' },
+              error: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params;
+      const { jid, type, url, caption, filename, ptt } = request.body;
+
+      try {
+        const result = await sessionManager.sendMedia(id, jid, type, url, {
+          caption,
+          filename,
+          ptt,
+        });
+
+        return reply.status(200).send({
+          success: true,
+          sessionId: id,
+          jid,
+          type,
+          messageId: result.messageId,
+          timestamp: result.timestamp,
+        });
+      } catch (err: any) {
+        request.log.error(
+          { sessionId: id, jid, type, url, err: err.message },
+          'Failed to send outbound media'
+        );
+        return reply.status(400).send({
+          success: false,
+          sessionId: id,
+          jid,
+          type,
+          messageId: '',
+          timestamp: Date.now(),
+          error: err.message || 'Failed to dispatch outbound media message',
         });
       }
     }
