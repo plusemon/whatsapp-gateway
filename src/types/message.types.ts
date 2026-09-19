@@ -64,10 +64,52 @@ export type WebhookPayload = WebhookInboundPayload | WebhookAckPayload;
 export interface OutboundMessageResult {
   messageId: string;
   timestamp: number;
+  status?: string;
 }
 
 /**
- * Request payload for sending outbound text messages.
+ * Standardized Botla REST API v1 Send Text Request Body
+ */
+export interface SendTextV1Body {
+  sessionId: string;
+  to: string;
+  message: string;
+  presence?: boolean;
+  // Aliases for compatibility
+  jid?: string;
+  text?: string;
+}
+
+/**
+ * Standardized Botla REST API v1 Send Media Request Body
+ */
+export interface SendMediaV1Body {
+  sessionId: string;
+  to: string;
+  mediaUrl: string;
+  mediaType: 'document' | 'image' | 'video' | 'audio';
+  caption?: string;
+  fileName?: string;
+  // Aliases for compatibility
+  jid?: string;
+  url?: string;
+  type?: 'document' | 'image' | 'video' | 'audio';
+  filename?: string;
+  ptt?: boolean;
+}
+
+/**
+ * Standardized Botla Inbound Webhook Event Payload
+ */
+export interface StandardWebhookPayload<T = any> {
+  event: 'message.inbound' | 'message.ack' | 'session.status' | string;
+  sessionId: string;
+  timestamp: string;
+  data: T;
+}
+
+/**
+ * Request payload for sending outbound text messages (legacy).
  */
 export interface SendMessageBody {
   jid: string;
@@ -86,7 +128,7 @@ export interface PairCodeBody {
  */
 export interface SendMediaBody {
   jid: string;
-  type: 'image' | 'audio' | 'document';
+  type: 'image' | 'audio' | 'document' | 'video';
   url: string;
   caption?: string;
   filename?: string;

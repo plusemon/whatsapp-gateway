@@ -37,7 +37,7 @@ export const config: GatewayConfig = {
   webhookSecret: process.env.WEBHOOK_SECRET || 'your_hmac_secret_here',
   webhookToken: process.env.BOTLA_WEBHOOK_TOKEN || process.env.WEBHOOK_BEARER_TOKEN || '',
   webhookEnabled: process.env.BOTLA_WEBHOOK_ENABLED === 'true' || process.env.WEBHOOK_ENABLED === 'true',
-  apiKey: process.env.API_KEY || process.env.GATEWAY_API_KEY || '',
+  apiKey: process.env.API_GATEWAY_KEY || process.env.API_KEY || process.env.GATEWAY_API_KEY || '',
   logLevel: process.env.LOG_LEVEL || 'info',
   logRetentionDays: parseNumber(process.env.LOG_RETENTION_DAYS, 14),
   mediaRetentionHours: parseNumber(process.env.MEDIA_RETENTION_HOURS, 48),

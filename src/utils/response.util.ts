@@ -14,20 +14,22 @@ export class ResponseUtil {
     statusCode = 200,
     extra: Record<string, any> = {}
   ): FastifyReply {
-    // If data is already an object, spread it alongside success: true for backward compatibility
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
-      return reply.status(statusCode).send({
-        success: true,
-        ...data,
-        ...extra,
-      });
-    }
-
-    return reply.status(statusCode).send({
+    const payload: Record<string, any> = {
       success: true,
       data,
       ...extra,
-    });
+    };
+
+    // For backwards compatibility with legacy UI expecting top-level fields
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      for (const [key, val] of Object.entries(data)) {
+        if (!(key in payload)) {
+          payload[key] = val;
+        }
+      }
+    }
+
+    return reply.status(statusCode).send(payload);
   }
 
   /**
@@ -41,14 +43,17 @@ export class ResponseUtil {
     details: any = null,
     extra: Record<string, any> = {}
   ): FastifyReply {
+    const errorObj: Record<string, any> = {
+      code,
+      message,
+    };
+    if (details !== null && details !== undefined) {
+      errorObj.details = details;
+    }
+
     return reply.status(statusCode).send({
       success: false,
-      message,
-      error: {
-        code,
-        message,
-        ...(details ? { details } : {}),
-      },
+      error: errorObj,
       ...extra,
     });
   }

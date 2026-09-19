@@ -27,8 +27,18 @@ export function getDashboardHtml(): string {
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) {
       try {
-        const content = fs.readFileSync(p, 'utf-8');
-        cachedDashboardHtml = content;
+        let content = fs.readFileSync(p, 'utf-8');
+        const activeKey =
+          process.env.API_GATEWAY_KEY ||
+          process.env.API_KEY ||
+          process.env.GATEWAY_API_KEY ||
+          'botla-gateway-api-key';
+        const injection = `<script>window.__BOTLA_API_KEY__ = ${JSON.stringify(activeKey)};</script>`;
+        if (content.includes('</head>')) {
+          content = content.replace('</head>', `${injection}\n</head>`);
+        } else if (content.includes('<body>')) {
+          content = content.replace('<body>', `<body>\n${injection}`);
+        }
         return content;
       } catch {
         // Fallback

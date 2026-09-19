@@ -42,6 +42,134 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   fastify.post('/settings/webhook/test', SettingsController.testWebhook);
 
   /* -------------------------------------------------------------------------- */
+  /* Production-Grade Headless REST API v1 Endpoints                            */
+  /* -------------------------------------------------------------------------- */
+
+  // 1. Session Lifecycle
+  fastify.post(
+    '/v1/sessions/init',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: {
+            sessionId: { type: 'string', minLength: 1 },
+            authMode: { type: 'string', enum: ['qr', 'pairing_code'] },
+          },
+        },
+      },
+    },
+    SessionController.initSessionV1
+  );
+
+  fastify.post(
+    '/v1/sessions/pair-code',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['sessionId', 'phoneNumber'],
+          properties: {
+            sessionId: { type: 'string', minLength: 1 },
+            phoneNumber: { type: 'string', minLength: 6 },
+          },
+        },
+      },
+    },
+    SessionController.pairCodeV1
+  );
+
+  fastify.get(
+    '/v1/sessions/:sessionId/status',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: {
+            sessionId: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    SessionController.getStatusV1
+  );
+
+  fastify.post(
+    '/v1/sessions/:sessionId/logout',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: {
+            sessionId: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    SessionController.logoutV1
+  );
+
+  fastify.delete(
+    '/v1/sessions/:sessionId',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: {
+            sessionId: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    SessionController.deleteSessionV1
+  );
+
+  // 2. Messaging
+  fastify.post(
+    '/v1/messages/send-text',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['sessionId', 'to', 'message'],
+          properties: {
+            sessionId: { type: 'string', minLength: 1 },
+            to: { type: 'string', minLength: 3 },
+            message: { type: 'string', minLength: 1 },
+            presence: { type: 'boolean' },
+          },
+        },
+      },
+    },
+    MessageController.sendTextV1
+  );
+
+  fastify.post(
+    '/v1/messages/send-media',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['sessionId', 'to', 'mediaUrl', 'mediaType'],
+          properties: {
+            sessionId: { type: 'string', minLength: 1 },
+            to: { type: 'string', minLength: 3 },
+            mediaUrl: { type: 'string', minLength: 4 },
+            mediaType: { type: 'string', enum: ['document', 'image', 'video', 'audio'] },
+            caption: { type: 'string' },
+            fileName: { type: 'string' },
+          },
+        },
+      },
+    },
+    MessageController.sendMediaV1
+  );
+
+  /* -------------------------------------------------------------------------- */
   /* WhatsApp Session Management Endpoints                                      */
   /* -------------------------------------------------------------------------- */
 

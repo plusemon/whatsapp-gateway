@@ -6,14 +6,220 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
 import { getRedisClient } from '../config/redis.js';
 import { sessionService } from '../services/session.service.js';
+import { extractPhoneFromJid } from '../utils/jid.util.js';
 import { ResponseUtil } from '../utils/response.util.js';
 import { getCachedWhatsAppVersion, getWhatsAppVersion } from '../utils/versionGuard.js';
 import type { PairCodeBody, SessionParams } from '../types/index.js';
 
 export class SessionController {
   /**
+   * POST /api/v1/sessions/init
+   * Standardized REST API v1 Session Initialization
+   */
+  public static async initSessionV1(
+    request: FastifyRequest<{ Body: { sessionId: string; authMode?: 'qr' | 'pairing_code' } }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply> {
+    const { sessionId, authMode = 'qr' } = request.body || {};
+    if (!sessionId || typeof sessionId !== 'string') {
+      return ResponseUtil.error(
+        reply,
+        'sessionId is required.',
+        400,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    try {
+      const sessionMeta = await sessionService.initSession(sessionId, authMode);
+      return ResponseUtil.success(
+        reply,
+        {
+          sessionId,
+          status: sessionMeta.status,
+          authMode: sessionMeta.authMode,
+          qr: sessionMeta.qr,
+        },
+        200
+      );
+    } catch (err: any) {
+      request.log.error({ sessionId, err: err.message }, 'Failed to initialize session v1');
+      return ResponseUtil.error(
+        reply,
+        `Failed to initialize session: ${err.message}`,
+        500,
+        'INIT_FAILED'
+      );
+    }
+  }
+
+  /**
+   * POST /api/v1/sessions/pair-code
+   * Standardized REST API v1 Phone Number Pairing Code
+   */
+  public static async pairCodeV1(
+    request: FastifyRequest<{ Body: { sessionId: string; phoneNumber: string } }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply> {
+    const { sessionId, phoneNumber } = request.body || {};
+    if (!sessionId || !phoneNumber) {
+      return ResponseUtil.error(
+        reply,
+        'sessionId and phoneNumber are required.',
+        400,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    try {
+      const formattedCode = await sessionService.requestPairingCode(sessionId, phoneNumber);
+      return ResponseUtil.success(
+        reply,
+        {
+          pairingCode: formattedCode,
+          expiresIn: 120,
+        },
+        200
+      );
+    } catch (err: any) {
+      request.log.error({ sessionId, phoneNumber, err: err.message }, 'Failed to generate pairing code v1');
+      return ResponseUtil.error(
+        reply,
+        err.message || 'Failed to request pairing code',
+        400,
+        'PAIRING_CODE_FAILED'
+      );
+    }
+  }
+
+  /**
+   * GET /api/v1/sessions/:sessionId/status
+   * Standardized REST API v1 Session Status
+   */
+  public static async getStatusV1(
+    request: FastifyRequest<{ Params: { sessionId?: string; id?: string } }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply> {
+    const sessionId = request.params.sessionId || request.params.id;
+    if (!sessionId) {
+      return ResponseUtil.error(
+        reply,
+        'sessionId parameter is required.',
+        400,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    const meta = sessionService.getSession(sessionId);
+    if (!meta) {
+      return ResponseUtil.error(
+        reply,
+        `Session '${sessionId}' not found`,
+        404,
+        'SESSION_NOT_FOUND'
+      );
+    }
+
+    const phone = meta.user?.id
+      ? extractPhoneFromJid(meta.user.id)
+      : ((meta as any).phoneNumber || (meta as any).phone || null);
+
+    const pushName = meta.user?.name || (meta as any).pushName || null;
+
+    return ResponseUtil.success(
+      reply,
+      {
+        sessionId,
+        status: meta.status,
+        phone,
+        pushName,
+      },
+      200
+    );
+  }
+
+  /**
+   * POST /api/v1/sessions/:sessionId/logout
+   * Standardized REST API v1 Logout
+   */
+  public static async logoutV1(
+    request: FastifyRequest<{ Params: { sessionId?: string; id?: string } }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply> {
+    const sessionId = request.params.sessionId || request.params.id;
+    if (!sessionId) {
+      return ResponseUtil.error(
+        reply,
+        'sessionId parameter is required.',
+        400,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    try {
+      await sessionService.logoutSession(sessionId);
+      return ResponseUtil.success(
+        reply,
+        {
+          sessionId,
+          status: 'disconnected',
+          message: 'Device unlinked successfully',
+        },
+        200
+      );
+    } catch (err: any) {
+      request.log.error({ sessionId, err: err.message }, 'Failed to logout session v1');
+      return ResponseUtil.error(
+        reply,
+        `Error logging out session '${sessionId}': ${err.message}`,
+        500,
+        'LOGOUT_FAILED'
+      );
+    }
+  }
+
+  /**
+   * DELETE /api/v1/sessions/:sessionId
+   * Standardized REST API v1 Purge
+   */
+  public static async deleteSessionV1(
+    request: FastifyRequest<{ Params: { sessionId?: string; id?: string } }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply> {
+    const sessionId = request.params.sessionId || request.params.id;
+    if (!sessionId) {
+      return ResponseUtil.error(
+        reply,
+        'sessionId parameter is required.',
+        400,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    try {
+      await sessionService.deleteSession(sessionId);
+      return ResponseUtil.success(
+        reply,
+        {
+          sessionId,
+          message: 'Session purged successfully',
+        },
+        200
+      );
+    } catch (err: any) {
+      request.log.error({ sessionId, err: err.message }, 'Failed to purge session v1');
+      return ResponseUtil.error(
+        reply,
+        `Error purging session '${sessionId}': ${err.message}`,
+        500,
+        'PURGE_FAILED'
+      );
+    }
+  }
+
+  /**
    * POST /api/sessions/:id/init
-   * Initializes or boots the WhatsApp Baileys socket session.
+   * Initializes or boots the WhatsApp Baileys socket session (legacy).
    */
   public static async initSession(
     request: FastifyRequest<{ Params: SessionParams; Body?: { authMode?: 'qr' | 'pairing_code' } }>,

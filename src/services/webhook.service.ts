@@ -279,8 +279,9 @@ export class WebhookService {
         .createHmac('sha256', active.secret)
         .update(bodyString)
         .digest('hex');
-      headers['X-Botla-Signature'] = signature;
+      headers['X-Botla-Signature'] = `sha256=${signature}`;
       headers['X-Hub-Signature-256'] = `sha256=${signature}`;
+      headers['X-Botla-Signature-Raw'] = signature;
     }
 
     const maxRetries = 3;
@@ -393,8 +394,9 @@ export class WebhookService {
         .createHmac('sha256', hmacSecret)
         .update(bodyString)
         .digest('hex');
-      headers['X-Botla-Signature'] = signature;
+      headers['X-Botla-Signature'] = `sha256=${signature}`;
       headers['X-Hub-Signature-256'] = `sha256=${signature}`;
+      headers['X-Botla-Signature-Raw'] = signature;
     }
 
     const startTime = Date.now();

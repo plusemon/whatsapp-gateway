@@ -13,7 +13,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import { clearRedisSession, useRedisAuthState } from '../adapters/redisAuthState.js';
 import { getRedisClient } from '../config/redis.js';
-import { formatPairingCode, sanitizePhoneNumber } from '../utils/jid.util.js';
+import { extractPhoneFromJid, formatPairingCode, sanitizePhoneNumber } from '../utils/jid.util.js';
 import { createSessionLogger, logGatewayEvent, logger } from '../utils/logger.js';
 import { getWhatsAppVersion } from '../utils/versionGuard.js';
 import { MediaService } from './media.service.js';
@@ -362,6 +362,19 @@ export class SessionService {
             status: 'connected',
             user: meta.user || sock.user,
           });
+
+          // Dispatch session.status to webhook
+          const connectedStatusPayload = {
+            event: 'session.status',
+            sessionId,
+            timestamp: new Date().toISOString(),
+            data: {
+              status: 'connected',
+              phone: meta.user?.id ? extractPhoneFromJid(meta.user.id) : (currentSession?.phoneNumber || null),
+              pushName: meta.user?.name || null,
+            },
+          };
+          WebhookService.dispatch(connectedStatusPayload).catch(() => {});
         }
 
         // 3. Connection closed / disconnected
@@ -553,8 +566,21 @@ export class SessionService {
             baileysLogger
           );
 
-          const payload: WebhookInboundPayload = {
+          const inboundData = {
+            key: msg.key,
+            from: msg.key.remoteJid,
+            pushName: msg.pushName || null,
+            text: extractedText,
+            media: inboundMedia,
+            raw: msg,
+          };
+
+          const payload: Record<string, any> = {
+            event: 'message.inbound',
             sessionId,
+            timestamp: new Date().toISOString(),
+            data: inboundData,
+            // Backwards compatibility for legacy receivers expecting message at root
             message: {
               key: msg.key,
               pushName: msg.pushName || null,
@@ -611,17 +637,19 @@ export class SessionService {
             const messageId = item.key?.id || '';
             const remoteJid = item.key?.remoteJid || '';
 
-            const ackPayload: WebhookAckPayload = {
-              sessionId,
+            const statusLabel = this.getAckStatusLabel(status);
+
+            const ackPayload: Record<string, any> = {
               event: 'message.ack',
+              sessionId,
+              timestamp: new Date().toISOString(),
               data: {
                 messageId,
                 remoteJid,
                 status,
+                statusLabel,
               },
             };
-
-            const statusLabel = this.getAckStatusLabel(status);
 
             sessionLog.info(
               {
@@ -716,7 +744,8 @@ export class SessionService {
   public async sendMessage(
     sessionId: string,
     jid: string,
-    text: string
+    text: string,
+    presence: boolean = true
   ): Promise<OutboundMessageResult> {
     const sock = this.activeSockets.get(sessionId);
     const meta = this.metadataMap.get(sessionId);
@@ -725,9 +754,16 @@ export class SessionService {
       throw new Error(`Session '${sessionId}' is not active or connected to WhatsApp`);
     }
 
-    return MessageService.sendText(sessionId, sock, jid, text, (type, sId, details) => {
-      this.logEvent(type, sId, details);
-    });
+    return MessageService.sendText(
+      sessionId,
+      sock,
+      jid,
+      text,
+      (type, sId, details) => {
+        this.logEvent(type, sId, details);
+      },
+      presence
+    );
   }
 
   /**
@@ -736,7 +772,7 @@ export class SessionService {
   public async sendMedia(
     sessionId: string,
     jid: string,
-    type: 'image' | 'audio' | 'document',
+    type: 'image' | 'audio' | 'document' | 'video',
     url: string,
     options?: {
       caption?: string;

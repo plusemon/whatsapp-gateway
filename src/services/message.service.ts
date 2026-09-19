@@ -18,7 +18,8 @@ export class MessageService {
     sock: WASocket,
     jid: string,
     text: string,
-    onLogged?: (type: 'outbound_message', sessionId: string, details: Record<string, any>) => void
+    onLogged?: (type: 'outbound_message', sessionId: string, details: Record<string, any>) => void,
+    presence: boolean = true
   ): Promise<OutboundMessageResult> {
     const sessionLog = createSessionLogger(sessionId);
     const targetJid = normalizeJid(jid);
@@ -29,19 +30,22 @@ export class MessageService {
       '[OutboundLifecycle] Outbound text message enqueued for dispatch'
     );
 
-    // Step 2: Anti-ban guardrail - send typing presence
-    await sock.sendPresenceUpdate('composing', targetJid);
-    const delay = Math.floor(Math.random() * (1400 - 600 + 1)) + 600;
+    let delay = 0;
+    if (presence !== false) {
+      // Step 2: Anti-ban guardrail - send typing presence
+      await sock.sendPresenceUpdate('composing', targetJid);
+      delay = Math.floor(Math.random() * (1400 - 600 + 1)) + 600;
 
-    sessionLog.info(
-      { jid: targetJid, presence: 'composing', delayMs: delay, step: 'presence_sent' },
-      `[OutboundLifecycle] Simulating typing presence (throttling for ${delay}ms)...`
-    );
+      sessionLog.info(
+        { jid: targetJid, presence: 'composing', delayMs: delay, step: 'presence_sent' },
+        `[OutboundLifecycle] Simulating typing presence (throttling for ${delay}ms)...`
+      );
 
-    await new Promise((resolve) => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
 
-    // Step 3: Clear presence 'paused'
-    await sock.sendPresenceUpdate('paused', targetJid);
+      // Step 3: Clear presence 'paused'
+      await sock.sendPresenceUpdate('paused', targetJid);
+    }
 
     // Step 4: Dispatch message via Baileys socket
     const sendResult = await sock.sendMessage(targetJid, { text });
@@ -65,17 +69,18 @@ export class MessageService {
     return {
       messageId,
       timestamp,
+      status: 'SERVER_ACK',
     };
   }
 
   /**
-   * Dispatches an outbound media message (image, audio, or document) with human presence simulation.
+   * Dispatches an outbound media message (image, audio, document, or video) with human presence simulation.
    */
   public static async sendMedia(
     sessionId: string,
     sock: WASocket,
     jid: string,
-    type: 'image' | 'audio' | 'document',
+    type: 'image' | 'audio' | 'document' | 'video',
     url: string,
     options?: {
       caption?: string;
@@ -130,6 +135,11 @@ export class MessageService {
         fileName: options?.filename || 'document.pdf',
         caption: options?.caption || undefined,
       };
+    } else if (type === 'video') {
+      messagePayload = {
+        video: { url },
+        caption: options?.caption || undefined,
+      };
     } else {
       throw new Error(`Unsupported media type: ${type}`);
     }
@@ -138,12 +148,12 @@ export class MessageService {
     try {
       sendResult = await sock.sendMessage(targetJid, messagePayload);
     } catch (directErr: any) {
-      // Fallback: fetch media buffer directly and dispatch with Buffer
+      // Fallback: safely stream/fetch remote media buffer and dispatch via native Buffer without blocking event loop
       sessionLog.warn(
         { type, url, err: directErr.message },
-        '[OutboundMedia] Direct URL dispatch failed; fetching media buffer as fallback'
+        '[OutboundMedia] Direct URL dispatch failed; streaming remote media buffer as fallback'
       );
-      const fetchRes = await fetch(url, { signal: AbortSignal.timeout(20000) });
+      const fetchRes = await fetch(url, { signal: AbortSignal.timeout(30000) });
       if (!fetchRes.ok) {
         throw new Error(`Failed to fetch media from URL (${fetchRes.status}: ${fetchRes.statusText})`);
       }
@@ -183,6 +193,7 @@ export class MessageService {
     return {
       messageId,
       timestamp,
+      status: 'SERVER_ACK',
     };
   }
 }
