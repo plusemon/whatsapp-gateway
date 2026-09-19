@@ -71,20 +71,28 @@ export class SessionManager {
    * Initializes or boots a Baileys WhatsApp socket session.
    * Connects to Redis for persistent authentication state and subscribes to lifecycle events.
    */
-  public async initSession(sessionId: string): Promise<SessionMetadata> {
+  public async initSession(
+    sessionId: string,
+    authMode: 'qr' | 'pairing_code' = 'qr'
+  ): Promise<SessionMetadata> {
     // Clear any terminating flag if re-initializing this session
     this.terminatingSessions.delete(sessionId);
 
     const existingSocket = this.activeSockets.get(sessionId);
     const existingMeta = this.metadataMap.get(sessionId);
 
-    // If session is already connected or actively connecting, return its state
-    if (existingSocket && existingMeta && (existingMeta.status === 'connected' || existingMeta.status === 'connecting')) {
-      logger.info({ sessionId, status: existingMeta.status }, '[SessionManager] Session already initialized');
+    // If session is already connected or actively connecting with matching authMode, return its state
+    if (
+      existingSocket &&
+      existingMeta &&
+      existingMeta.authMode === authMode &&
+      (existingMeta.status === 'connected' || existingMeta.status === 'connecting')
+    ) {
+      logger.info({ sessionId, status: existingMeta.status, authMode }, '[SessionManager] Session already initialized');
       return existingMeta;
     }
 
-    // Terminate any previous socket reference if re-initializing from qr_ready, qr_expired or disconnected
+    // Terminate any previous socket reference if switching auth mode or re-initializing
     if (existingSocket) {
       try {
         existingSocket.end(undefined);
@@ -100,6 +108,7 @@ export class SessionManager {
     const meta: SessionMetadata = {
       id: sessionId,
       status: 'connecting',
+      authMode,
       qr: null,
       qrUpdatedAt: null,
       user: null,
@@ -108,7 +117,7 @@ export class SessionManager {
       lastActiveAt: Date.now(),
     };
     this.metadataMap.set(sessionId, meta);
-    this.logEvent('session_event', sessionId, { action: 'init_started' });
+    this.logEvent('session_event', sessionId, { action: 'init_started', authMode });
 
     try {
       // Step A: Initialize Custom Redis Auth State
@@ -118,12 +127,12 @@ export class SessionManager {
       const baileysLogger = logger.child({ module: 'baileys', sessionId });
       baileysLogger.level = 'warn';
 
-      // Step B: Create WASocket instance with standard browser signature
+      // Step B: Create WASocket instance with Ubuntu Chrome browser signature
       const sock = makeWASocket({
         auth: state,
         logger: baileysLogger,
         printQRInTerminal: false,
-        browser: Browsers.macOS('Desktop'),
+        browser: Browsers.ubuntu('Chrome'),
         syncFullHistory: false,
         markOnlineOnConnect: false,
         generateHighQualityLinkPreview: false,
@@ -157,21 +166,28 @@ export class SessionManager {
         const { connection, lastDisconnect, qr } = update;
         meta.lastActiveAt = Date.now();
 
-        // 1. Capture and cache raw QR strings
+        // 1. Capture and cache raw QR strings ONLY when in 'qr' authMode
         if (qr) {
-          meta.qr = qr;
-          meta.qrUpdatedAt = Date.now();
-          meta.status = 'qr_ready';
-          logger.info({ sessionId }, '[SessionManager] New QR Code generated for session');
+          if (meta.authMode === 'pairing_code') {
+            logger.info(
+              { sessionId },
+              '[SessionManager] Suppressing QR code generation for session in pairing_code auth mode'
+            );
+          } else {
+            meta.qr = qr;
+            meta.qrUpdatedAt = Date.now();
+            meta.status = 'qr_ready';
+            logger.info({ sessionId }, '[SessionManager] New QR Code generated for session');
 
-          // Cache QR in Redis with 60-second TTL
-          try {
-            await redis.set(`wa:session:${sessionId}:qr`, qr, 'EX', 60);
-          } catch (err: any) {
-            logger.warn({ sessionId, err: err.message }, '[Redis] Failed to cache QR string in Redis');
+            // Cache QR in Redis with 60-second TTL
+            try {
+              await redis.set(`wa:session:${sessionId}:qr`, qr, 'EX', 60);
+            } catch (err: any) {
+              logger.warn({ sessionId, err: err.message }, '[Redis] Failed to cache QR string in Redis');
+            }
+
+            this.logEvent('session_event', sessionId, { action: 'qr_generated' });
           }
-
-          this.logEvent('session_event', sessionId, { action: 'qr_generated' });
         }
 
         // 2. Connection opened successfully
@@ -665,6 +681,11 @@ export class SessionManager {
     if (this.terminatingSessions.has(sessionId)) return null;
 
     const meta = this.metadataMap.get(sessionId);
+    // If session is explicitly in pairing_code mode, do not serve QR code
+    if (meta?.authMode === 'pairing_code') {
+      return null;
+    }
+
     if (meta?.qr) {
       return meta.qr;
     }
@@ -701,6 +722,7 @@ export class SessionManager {
       .map((m) => ({
         id: m.id,
         status: m.status,
+        authMode: m.authMode,
         hasQr: !!m.qr,
         user: m.user,
         createdAt: m.createdAt,
@@ -748,7 +770,7 @@ export class SessionManager {
       for (const sessionId of sessionIds) {
         try {
           logger.info({ sessionId }, '[SessionManager] Auto-restoring session...');
-          await this.initSession(sessionId);
+          await this.initSession(sessionId, 'qr');
           logger.info({ sessionId }, '[SessionManager] Successfully auto-restored session');
         } catch (sessionErr: any) {
           logger.error(
@@ -766,26 +788,47 @@ export class SessionManager {
 
   /**
    * Requests an 8-character pairing code for phone number pairing (alternative to QR scanning).
-   * Formats the pairing code with hyphen (e.g., ABCD-1234).
+   * Ensures pairing mode is isolated and stale QR instances are terminated before requesting code.
    */
   public async requestPairingCode(sessionId: string, phoneNumber: string): Promise<string> {
-    let sock = this.activeSockets.get(sessionId);
-    let meta = this.metadataMap.get(sessionId);
-
-    // If socket not initialized yet, initialize it
-    if (!sock || !meta) {
-      meta = await this.initSession(sessionId);
-      sock = this.activeSockets.get(sessionId);
-    }
-
-    if (!sock) {
-      throw new Error(`Failed to initialize session '${sessionId}' for pairing code`);
-    }
-
     // Clean and validate phone number (digits only)
     const cleanPhone = phoneNumber.replace(/\D/g, '');
     if (!cleanPhone || cleanPhone.length < 8) {
       throw new Error('Invalid phone number. Must include country code and digits (e.g. 88017xxxxxxxx).');
+    }
+
+    let sock = this.activeSockets.get(sessionId);
+    let meta = this.metadataMap.get(sessionId);
+
+    // If socket exists in 'qr' mode or needs re-init for pairing_code mode, cleanly re-initialize
+    if (!sock || !meta || meta.authMode !== 'pairing_code' || meta.status === 'disconnected' || meta.status === 'qr_expired') {
+      if (sock) {
+        try {
+          sock.end(undefined);
+        } catch {
+          // Ignore
+        }
+        this.activeSockets.delete(sessionId);
+      }
+
+      // Clean up any stale QR cache from Redis
+      try {
+        const redis = await getRedisClient();
+        await redis.del(`wa:session:${sessionId}:qr`);
+      } catch {
+        // Ignore
+      }
+
+      meta = await this.initSession(sessionId, 'pairing_code');
+      sock = this.activeSockets.get(sessionId);
+
+      // Stabilization delay (2000ms) after socket instantiation before requesting pairing code
+      logger.info({ sessionId }, '[SessionManager] Waiting 2000ms for socket stabilization prior to pairing code request...');
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    if (!sock) {
+      throw new Error(`Failed to initialize session '${sessionId}' for pairing code`);
     }
 
     // Verify session is not already registered

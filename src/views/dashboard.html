@@ -1204,11 +1204,20 @@
         viewCode.classList.add('hidden');
         btnQr.className = 'py-2 px-3 rounded-lg bg-zinc-800 text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
         btnCode.className = 'py-2 px-3 rounded-lg text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
+        fetchAndDisplayQr();
+        if (!qrPollInterval) {
+          qrPollInterval = setInterval(fetchAndDisplayQr, 3000);
+        }
       } else {
         viewQr.classList.add('hidden');
         viewCode.classList.remove('hidden');
         btnCode.className = 'py-2 px-3 rounded-lg bg-zinc-800 text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
         btnQr.className = 'py-2 px-3 rounded-lg text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
+        // Stop QR polling when user switches to Phone Pairing Code mode
+        if (qrPollInterval) {
+          clearInterval(qrPollInterval);
+          qrPollInterval = null;
+        }
       }
     }
 
@@ -1218,9 +1227,16 @@
       document.getElementById('pair-code-session').value = sessionId;
       openQrModal();
 
-      if (qrPollInterval) clearInterval(qrPollInterval);
-      await fetchAndDisplayQr();
-      qrPollInterval = setInterval(fetchAndDisplayQr, 3000);
+      // Check current active tab
+      const isCodeTab = !document.getElementById('pairing-view-code')?.classList.contains('hidden');
+      if (qrPollInterval) {
+        clearInterval(qrPollInterval);
+        qrPollInterval = null;
+      }
+      if (!isCodeTab) {
+        await fetchAndDisplayQr();
+        qrPollInterval = setInterval(fetchAndDisplayQr, 3000);
+      }
     }
 
     async function fetchAndDisplayQr() {
@@ -1306,6 +1322,12 @@
     }
 
     async function requestPairingCode() {
+      // Clear any ongoing QR polling to prevent background QR queries
+      if (qrPollInterval) {
+        clearInterval(qrPollInterval);
+        qrPollInterval = null;
+      }
+
       const sessionInput = document.getElementById('pair-code-session');
       const phoneInput = document.getElementById('pair-code-phone');
       const sessionId = sessionInput.value.trim() || 'tenant-botla-1';

@@ -1,6 +1,11 @@
 import type { proto } from '@whiskeysockets/baileys';
 
 /**
+ * Authentication mode for the session socket lifecycle.
+ */
+export type AuthMode = 'qr' | 'pairing_code';
+
+/**
  * Current connection lifecycle status for a tenant session.
  */
 export type SessionStatus =
@@ -18,6 +23,7 @@ export type SessionStatus =
 export interface SessionMetadata {
   id: string;
   status: SessionStatus;
+  authMode: AuthMode;
   qr: string | null;
   qrUpdatedAt: number | null;
   user: {
@@ -35,6 +41,7 @@ export interface SessionMetadata {
 export interface SessionSummary {
   id: string;
   status: SessionStatus;
+  authMode: AuthMode;
   hasQr: boolean;
   user: {
     id: string;
