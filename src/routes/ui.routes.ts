@@ -17,6 +17,8 @@ export function getDashboardHtml(): string {
   }
 
   const possiblePaths = [
+    path.resolve(process.cwd(), 'public/index.html'),
+    path.resolve(process.cwd(), 'index.html'),
     path.resolve(process.cwd(), 'src/views/dashboard.html'),
     path.resolve(process.cwd(), 'dist/views/dashboard.html'),
     path.resolve(process.cwd(), 'views/dashboard.html'),

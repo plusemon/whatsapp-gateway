@@ -48,6 +48,23 @@ export async function buildServer() {
     list: false,
   });
 
+  // 2b. Static asset serving for modular frontend assets (CSS/JS)
+  const publicDir = path.resolve(process.cwd(), 'public');
+  if (!fs.existsSync(publicDir)) {
+    try {
+      fs.mkdirSync(publicDir, { recursive: true });
+    } catch {
+      // Ignore
+    }
+  }
+
+  await fastify.register(fastifyStatic, {
+    root: publicDir,
+    prefix: '/',
+    decorateReply: false,
+    index: false,
+  });
+
   // 3. Register global error & JSON 404 handlers
   registerErrorHandlers(fastify, getDashboardHtml);
 
