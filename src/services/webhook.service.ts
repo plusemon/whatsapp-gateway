@@ -33,6 +33,29 @@ const GLOBAL_WEBHOOK_KEY = 'wa:settings:webhook';
 
 export class WebhookService {
   /**
+   * Generates HMAC-SHA256 signature for a payload.
+   */
+  public static generateSignature(payload: string | Record<string, any>, secret: string): string {
+    const raw = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    return crypto.createHmac('sha256', secret).update(raw).digest('hex');
+  }
+
+  /**
+   * Verifies an HMAC-SHA256 signature against a payload and secret.
+   * Supports raw hex or prefixed format (e.g. 'sha256=...').
+   */
+  public static verifySignature(payload: string | Record<string, any>, secret: string, signature: string): boolean {
+    if (!signature || !secret) return false;
+    const cleanSig = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+    const expected = this.generateSignature(payload, secret);
+    try {
+      return crypto.timingSafeEqual(Buffer.from(cleanSig, 'hex'), Buffer.from(expected, 'hex'));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Get global webhook config from Redis or fallback to env.
    */
   public static async getGlobalConfig(): Promise<WebhookConfig & { source: 'global' | 'env' }> {
@@ -275,10 +298,7 @@ export class WebhookService {
     }
 
     if (active.secret) {
-      const signature = crypto
-        .createHmac('sha256', active.secret)
-        .update(bodyString)
-        .digest('hex');
+      const signature = WebhookService.generateSignature(bodyString, active.secret);
       headers['X-Botla-Signature'] = `sha256=${signature}`;
       headers['X-Hub-Signature-256'] = `sha256=${signature}`;
       headers['X-Botla-Signature-Raw'] = signature;
@@ -390,10 +410,7 @@ export class WebhookService {
     }
 
     if (hmacSecret) {
-      const signature = crypto
-        .createHmac('sha256', hmacSecret)
-        .update(bodyString)
-        .digest('hex');
+      const signature = WebhookService.generateSignature(bodyString, hmacSecret);
       headers['X-Botla-Signature'] = `sha256=${signature}`;
       headers['X-Hub-Signature-256'] = `sha256=${signature}`;
       headers['X-Botla-Signature-Raw'] = signature;

@@ -807,6 +807,27 @@ export class SessionService {
   }
 
   /**
+   * Checks if a session is currently marked in terminatingSessions.
+   */
+  public isTerminating(sessionId: string): boolean {
+    return this.terminatingSessions.has(sessionId);
+  }
+
+  /**
+   * Marks a session as terminating for intentional shutdown or purge guards.
+   */
+  public markTerminating(sessionId: string): void {
+    this.terminatingSessions.add(sessionId);
+  }
+
+  /**
+   * Clears a session from terminatingSessions.
+   */
+  public clearTerminating(sessionId: string): void {
+    this.terminatingSessions.delete(sessionId);
+  }
+
+  /**
    * Retrieves raw QR string for a given session from memory or Redis.
    * Suppresses QR retrieval if session is in dedicated 'pairing_code' authMode.
    */
