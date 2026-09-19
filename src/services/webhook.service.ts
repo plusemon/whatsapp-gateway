@@ -9,6 +9,7 @@ import { getRedisClient } from '../config/redis.js';
 import { DbService } from './db.service.js';
 import { createSessionLogger, logger } from '../utils/logger.js';
 import type { WebhookPayload } from '../types/message.types.js';
+import { enqueueWebhookJob, type WebhookJobPayload } from '../queues/webhook.queue.js';
 
 export interface WebhookConfig {
   url: string;
@@ -31,6 +32,40 @@ export interface WebhookConfig {
 }
 
 const GLOBAL_WEBHOOK_KEY = 'wa:settings:webhook';
+
+/**
+ * Enqueues an outbound webhook dispatch job into the resilient BullMQ queue.
+ * Automatically checks tenant & global subscription filters and webhook endpoints.
+ */
+export async function dispatchWebhookEvent(
+  sessionId: string,
+  event: string,
+  data: any,
+  logId?: string
+): Promise<boolean> {
+  const webhookConfig = await WebhookService.resolveWebhook(sessionId);
+  if (!webhookConfig || !webhookConfig.enabled || !webhookConfig.url) {
+    return false;
+  }
+
+  // Event category filtering
+  if (event === 'message.inbound' && !webhookConfig.events.inbound) return false;
+  if (event === 'message.ack' && !webhookConfig.events.ack) return false;
+  if (event === 'session.status' && !webhookConfig.events.status) return false;
+
+  await enqueueWebhookJob(`webhook:${sessionId}:${event}`, {
+    logId,
+    sessionId,
+    targetUrl: webhookConfig.url,
+    secret: webhookConfig.secret,
+    token: webhookConfig.token,
+    event: event as any,
+    data,
+    timestamp: new Date().toISOString(),
+  });
+
+  return true;
+}
 
 export class WebhookService {
   /**
@@ -100,7 +135,6 @@ export class WebhookService {
       source: 'env',
     };
   }
-
 
   /**
    * Get session-specific webhook override.
@@ -222,7 +256,7 @@ export class WebhookService {
   /**
    * Update retry stats in Redis for global and session.
    */
-  private static async updateStats(sessionId: string | undefined, success: boolean, errorMsg?: string): Promise<void> {
+  public static async updateStats(sessionId: string | undefined, success: boolean, errorMsg?: string): Promise<void> {
     try {
       const redis = await getRedisClient();
       const now = new Date().toISOString();
@@ -265,7 +299,8 @@ export class WebhookService {
   }
 
   /**
-   * Asynchronously posts payload to webhook with exponential backoff retry (up to 3 attempts: 1s, 3s, 9s).
+   * Asynchronously posts payload to webhook with exponential backoff retry.
+   * Can also enqueue to BullMQ webhookQueue for decoupled processing.
    */
   public static async dispatch(
     payload: WebhookPayload | Record<string, any>,
@@ -284,15 +319,16 @@ export class WebhookService {
       return false;
     }
 
-    const eventName = (payload as any).event || ((payload as any).message ? 'inbound_message' : 'session_event');
-    if (eventName === 'inbound_message' && !active.events.inbound) return false;
+    const eventName = (payload as any).event || ((payload as any).message ? 'message.inbound' : 'session.status');
+    if ((eventName === 'inbound_message' || eventName === 'message.inbound') && !active.events.inbound) return false;
     if (eventName === 'message.ack' && !active.events.ack) return false;
-    if (eventName === 'session_event' && !active.events.status) return false;
+    if ((eventName === 'session_event' || eventName === 'session.status') && !active.events.status) return false;
 
     const bodyString = JSON.stringify(payload);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': 'WhatsApp-Gateway/1.2',
+      'User-Agent': 'Botla-WhatsApp-Gateway/1.2',
+      'X-Gateway-Event': eventName,
     };
 
     if (active.token) {
@@ -301,6 +337,7 @@ export class WebhookService {
 
     if (active.secret) {
       const signature = WebhookService.generateSignature(bodyString, active.secret);
+      headers['X-Signature-256'] = `sha256=${signature}`;
       headers['X-Gateway-Signature-256'] = `sha256=${signature}`;
       headers['X-Hub-Signature-256'] = `sha256=${signature}`;
       headers['X-Gateway-Signature-Raw'] = signature;
@@ -313,6 +350,7 @@ export class WebhookService {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        headers['X-Delivery-Attempt'] = String(attempt + 1);
         const response = await fetch(active.url, {
           method: 'POST',
           headers,
@@ -377,7 +415,7 @@ export class WebhookService {
 
         await this.updateStats(sessionId, false, err.message);
 
-        // Audit delivery failure in relational DB
+        // Audit delivery failure in relational DB (DLQ)
         if (sessionId) {
           DbService.createWebhookLog({
             sessionId,
@@ -440,6 +478,7 @@ export class WebhookService {
 
     if (hmacSecret) {
       const signature = WebhookService.generateSignature(bodyString, hmacSecret);
+      headers['X-Signature-256'] = `sha256=${signature}`;
       headers['X-Gateway-Signature-256'] = `sha256=${signature}`;
       headers['X-Hub-Signature-256'] = `sha256=${signature}`;
       headers['X-Gateway-Signature-Raw'] = signature;

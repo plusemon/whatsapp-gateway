@@ -478,6 +478,40 @@ export function createPrismaMock(): PrismaClient {
         return found ? { ...found } : null;
       },
 
+      findFirst: async (args?: { where?: any; orderBy?: any }) => {
+        let result = [...webhookLogs];
+
+        if (args?.where) {
+          if (args.where.sessionId) result = result.filter((l) => l.sessionId === args.where.sessionId);
+          if (args.where.event) result = result.filter((l) => l.event === args.where.event);
+          if (args.where.success !== undefined) result = result.filter((l) => l.success === args.where.success);
+        }
+
+        if (args?.orderBy) {
+          if (args.orderBy.createdAt === 'desc') {
+            result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          } else if (args.orderBy.createdAt === 'asc') {
+            result.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          }
+        }
+
+        return result.length > 0 ? { ...result[0] } : null;
+      },
+
+      update: async (args: { where: { id: string }; data: any }) => {
+        const index = webhookLogs.findIndex((l) => l.id === args.where.id);
+        if (index === -1) {
+          throw new Error(`Record to update not found. WebhookLog '${args.where.id}' does not exist.`);
+        }
+        const existing = webhookLogs[index];
+        const updated = {
+          ...existing,
+          ...args.data,
+        };
+        webhookLogs[index] = updated;
+        return { ...updated };
+      },
+
       count: async (args?: { where?: any }) => {
         if (!args?.where || Object.keys(args.where).length === 0) {
           return webhookLogs.length;

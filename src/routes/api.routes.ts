@@ -8,6 +8,7 @@ import { authMiddleware } from '../middleware/auth.middleware.js';
 import { messageRoutes } from './message.routes.js';
 import { sessionRoutes } from './session.routes.js';
 import { systemRoutes } from './system.routes.js';
+import { webhookRoutes } from './webhook.routes.js';
 
 export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   // Apply authentication hook across all API routes
@@ -17,4 +18,5 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   await fastify.register(systemRoutes);
   await fastify.register(sessionRoutes);
   await fastify.register(messageRoutes);
+  await fastify.register(webhookRoutes);
 };

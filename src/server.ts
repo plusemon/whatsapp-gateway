@@ -18,6 +18,8 @@ import { sessionService } from './services/session.service.js';
 import { DbService } from './services/db.service.js';
 import { initMessageWorker, closeMessageWorker } from './queues/message.worker.js';
 import { messageQueue, redisConnection } from './queues/message.queue.js';
+import { initWebhookWorker, closeWebhookWorker } from './queues/webhook.worker.js';
+import { webhookQueue, webhookRedisConnection } from './queues/webhook.queue.js';
 import { startMediaCleanupWorker, stopMediaCleanupWorker } from './utils/cleanup.js';
 import { logger } from './utils/logger.js';
 
@@ -136,6 +138,14 @@ export async function startServer() {
       logger.warn({ err: workerErr.message }, '[Server] Warning initializing BullMQ message worker');
     }
 
+    // Initialize BullMQ Webhook Dispatch Worker
+    try {
+      initWebhookWorker(webhookRedisConnection);
+      logger.info('[Server] BullMQ Webhook Dispatch Worker initialized successfully');
+    } catch (whErr: any) {
+      logger.warn({ err: whErr.message }, '[Server] Warning initializing BullMQ webhook worker');
+    }
+
     // Auto-restore previously active sessions from persistent Redis storage
     sessionService.restoreAllSessions().catch((restoreErr) => {
       logger.error(
@@ -151,12 +161,19 @@ export async function startServer() {
       // 1. Stop background workers
       stopMediaCleanupWorker();
 
-      // 1b. Close BullMQ Message Worker & Queue
+      // 1b. Close BullMQ Message & Webhook Workers & Queues
       try {
         await closeMessageWorker();
         await messageQueue.close();
       } catch (queueErr: any) {
         logger.warn({ err: queueErr.message }, '[Server] Warning closing message queue during shutdown');
+      }
+
+      try {
+        await closeWebhookWorker();
+        await webhookQueue.close();
+      } catch (whQueueErr: any) {
+        logger.warn({ err: whQueueErr.message }, '[Server] Warning closing webhook queue during shutdown');
       }
 
       // 2. Gracefully end active WASockets
