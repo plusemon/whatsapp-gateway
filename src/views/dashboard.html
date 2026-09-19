@@ -7,759 +7,961 @@
   <meta name="description" content="Multi-tenant WhatsApp Web microservice with Baileys, Redis auth state, media pipeline, pairing code, and auto-restore.">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="/css/styles.css">
-  <script>
-    // Immediate early registration for UI navigation to guarantee zero race-condition window errors
-    window.switchTab = function(tab) {
-      const panelSessions = document.getElementById('section-sessions');
-      const panelSender = document.getElementById('section-sender');
-      const panelStream = document.getElementById('section-stream');
-
-      const desktopSessions = document.getElementById('desktop-tab-sessions');
-      const desktopSender = document.getElementById('desktop-tab-sender');
-      const desktopStream = document.getElementById('desktop-tab-stream');
-
-      const navSessions = document.getElementById('bottom-nav-sessions');
-      const navSender = document.getElementById('bottom-nav-sender');
-      const navStream = document.getElementById('bottom-nav-stream');
-
-      const tabSessions = document.getElementById('mobile-tab-sessions');
-      const tabSender = document.getElementById('mobile-tab-sender');
-      const tabStream = document.getElementById('mobile-tab-stream');
-
-      [panelSessions, panelSender, panelStream].forEach(function(p) { if (p) p.classList.add('hidden'); });
-
-      var desktopInactive = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer';
-      [desktopSessions, desktopSender, desktopStream].forEach(function(t) { if (t) t.className = desktopInactive; });
-      [tabSessions, tabSender, tabStream].forEach(function(t) { if (t) t.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer'; });
-      [navSessions, navSender].forEach(function(n) { if (n) n.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer'; });
-      if (navStream) navStream.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer relative';
-
-      if (tab === 'sessions') {
-        if (panelSessions) panelSessions.classList.remove('hidden');
-        if (desktopSessions) desktopSessions.className = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
-        if (tabSessions) tabSessions.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
-        if (navSessions) navSessions.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-emerald-400 transition cursor-pointer';
-      } else if (tab === 'sender') {
-        if (panelSender) panelSender.classList.remove('hidden');
-        if (desktopSender) desktopSender.className = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
-        if (tabSender) tabSender.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
-        if (navSender) navSender.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-indigo-400 transition cursor-pointer';
-      } else if (tab === 'stream') {
-        if (panelStream) panelStream.classList.remove('hidden');
-        if (desktopStream) desktopStream.className = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
-        if (tabStream) tabStream.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
-        if (navStream) navStream.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-cyan-400 transition cursor-pointer relative';
-      }
-    };
-    window.switchMobileTab = window.switchTab;
-  </script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="/js/dashboard.js" defer></script>
 </head>
 <body class="min-h-screen flex flex-col antialiased selection:bg-emerald-500/20 selection:text-emerald-300 pb-28 md:pb-8">
 
-  <!-- Top Navigation & Header Bar -->
-  <header class="sticky top-0 z-30 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-4 py-3">
-    <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
-      <!-- App Brand Title -->
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-bold shadow-lg shadow-emerald-900/30">
-          <svg class="w-4 h-4 text-zinc-950" fill="currentColor" viewBox="0 0 24 24"><path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.312.045-.694.072-2.18-.544-1.748-.724-2.852-2.493-2.937-2.607-.087-.114-.712-.947-.712-1.808 0-.86.452-1.282.613-1.458.161-.176.353-.22.47-.22.118 0 .235.001.338.006.11.005.257-.042.402.308.15.362.511 1.246.557 1.337.045.09.076.196.015.316-.06.12-.09.195-.181.301-.09.106-.188.236-.269.317-.091.09-.187.189-.08.373.106.184.471.776 1.01 1.257.694.619 1.28.81 1.462.901.182.09.288.076.394-.045.106-.12.453-.527.574-.708.12-.18.241-.15.405-.09.164.06 1.041.491 1.22.581.18.09.3.136.345.211.046.076.046.438-.098.843z"/></svg>
-        </div>
-        <div>
-          <h1 class="font-bold text-white text-base tracking-tight leading-tight flex items-center gap-2">
-            <span>Botla WhatsApp Gateway</span>
-            <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">v1.2</span>
-          </h1>
-          <p class="text-[11px] text-zinc-400 font-mono flex items-center gap-2">
-            <span>Baileys Engine</span>
-            <span class="text-zinc-600">·</span>
-            <span>Zero Chromium</span>
-          </p>
-        </div>
-      </div>
+  <!-- Vue 3 Root Application Container -->
+  <div id="app" v-cloak class="min-h-screen flex flex-col">
 
-      <!-- Desktop Inline Navigation Tabs (>= 768px ONLY) -->
-      <nav class="hidden md:flex items-center gap-1 p-1 bg-zinc-900/90 rounded-xl border border-zinc-800 text-xs font-semibold">
-        <button id="desktop-tab-sessions" onclick="window.switchTab('sessions')" class="flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer">
-          <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-          <span>Sessions</span>
-        </button>
-        <button id="desktop-tab-sender" onclick="window.switchTab('sender')" class="flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer">
-          <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-          <span>Console</span>
-        </button>
-        <button id="desktop-tab-stream" onclick="window.switchTab('stream')" class="flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer">
-          <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-          <span>Live Logs</span>
-        </button>
-      </nav>
-
-      <!-- Live Telemetry Badges & Refresh -->
-      <div class="flex items-center gap-2 text-xs">
-        <div class="hidden sm:flex items-center gap-2">
-          <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
-            <span id="redis-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span class="text-zinc-400">Redis:</span>
-            <span id="redis-status" class="text-emerald-400 font-mono font-medium">checking</span>
+    <!-- Top Navigation & Header Bar -->
+    <header class="sticky top-0 z-30 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-4 py-3">
+      <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+        
+        <!-- App Brand & Engine Meta -->
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-bold shadow-lg shadow-emerald-900/30">
+            <svg class="w-4 h-4 text-zinc-950" fill="currentColor" viewBox="0 0 24 24"><path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.312.045-.694.072-2.18-.544-1.748-.724-2.852-2.493-2.937-2.607-.087-.114-.712-.947-.712-1.808 0-.86.452-1.282.613-1.458.161-.176.353-.22.47-.22.118 0 .235.001.338.006.11.005.257-.042.402.308.15.362.511 1.246.557 1.337.045.09.076.196.015.316-.06.12-.09.195-.181.301-.09.106-.188.236-.269.317-.091.09-.187.189-.08.373.106.184.471.776 1.01 1.257.694.619 1.28.81 1.462.901.182.09.288.076.394-.045.106-.12.453-.527.574-.708.12-.18.241-.15.405-.09.164.06 1.041.491 1.22.581.18.09.3.136.345.211.046.076.046.438-.098.843z"/></svg>
           </div>
-          <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
-            <span class="text-zinc-400">WA Core:</span>
-            <span id="wa-version-status" class="text-emerald-400 font-medium">loading</span>
-          </div>
-          <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
-            <span class="text-zinc-400">Retention:</span>
-            <span id="media-status" class="text-zinc-300 font-mono">24h</span>
-          </div>
-        </div>
-        <button onclick="window.manualRefreshAll()" class="p-2 rounded-xl card-surface hover:bg-zinc-800 text-zinc-300 hover:text-white transition active:scale-95 cursor-pointer" title="Refresh Telemetry & Sessions">
-          <svg id="manual-refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-        </button>
-      </div>
-    </div>
-  </header>
-
-  <!-- Main Content Container -->
-  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
-
-    <!-- ========================================================================= -->
-    <!-- TAB 1: SESSIONS / BALANCED OPERATIONAL DASHBOARD OVERVIEW                -->
-    <!-- ========================================================================= -->
-    <section id="section-sessions" class="space-y-6">
-      
-      <!-- Top Overview Stats Ribbon (Compact Responsive Layout) -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-        <div class="card-surface rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:gap-3">
-          <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0">
-            <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <p class="text-[10px] sm:text-[11px] text-zinc-400 truncate">Active Sockets</p>
-            <p id="sessions-total-count" class="text-xs sm:text-base font-bold text-white font-mono leading-tight">0</p>
-          </div>
-        </div>
-
-        <div class="card-surface rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:gap-3">
-          <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center flex-shrink-0">
-            <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <p class="text-[10px] sm:text-[11px] text-zinc-400 truncate">Persistence</p>
-            <p class="text-xs sm:text-xs font-semibold text-zinc-200 font-mono leading-tight truncate">Redis Adapter</p>
-          </div>
-        </div>
-
-        <div class="card-surface rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:gap-3">
-          <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center flex-shrink-0">
-            <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <p class="text-[10px] sm:text-[11px] text-zinc-400 truncate">Anti-Ban</p>
-            <p class="text-xs sm:text-xs font-semibold text-emerald-400 font-mono leading-tight truncate">Emulation</p>
-          </div>
-        </div>
-
-        <div class="card-surface rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:gap-3">
-          <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center flex-shrink-0">
-            <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <p class="text-[10px] sm:text-[11px] text-zinc-400 truncate">Gateway</p>
-            <p class="text-xs sm:text-xs font-semibold text-emerald-400 font-mono leading-tight flex items-center gap-1.5">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
-              <span class="truncate">Online</span>
+          <div>
+            <h1 class="font-bold text-white text-base tracking-tight leading-tight flex items-center gap-2">
+              <span>Botla WhatsApp Gateway</span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">v1.2</span>
+            </h1>
+            <p class="text-[11px] text-zinc-400 font-mono flex items-center gap-2">
+              <span>Baileys Engine</span>
+              <span class="text-zinc-600">·</span>
+              <span>Zero Chromium</span>
             </p>
           </div>
         </div>
-      </div>
 
-      <!-- Dashboard Modules Bento Layout -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        
-        <!-- Left Column (lg:col-span-5): Boot Tenant Session & HMAC Webhook Relay Target -->
-        <div class="lg:col-span-5 space-y-6">
-          
-          <!-- Module 1: Boot Tenant Session Form -->
-          <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm border border-zinc-800/60">
-            <div class="flex items-center justify-between">
-              <h2 class="font-bold text-white text-sm flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-                <span>Boot Tenant Session</span>
-              </h2>
-              <span class="text-[11px] text-zinc-500 font-mono">Multi-Tenant</span>
+        <!-- Desktop Navigation Tabs (>= 768px ONLY - Prevents Duplicate Nav Bars) -->
+        <nav class="hidden md:flex items-center gap-1 p-1 bg-zinc-900/90 rounded-xl border border-zinc-800 text-xs font-semibold">
+          <button @click="activeTab = 'sessions'" :class="activeTab === 'sessions' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'" class="flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg transition active:scale-95 cursor-pointer">
+            <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+            <span>Sessions</span>
+          </button>
+          <button @click="activeTab = 'console'" :class="activeTab === 'console' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'" class="flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg transition active:scale-95 cursor-pointer">
+            <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+            <span>Console</span>
+          </button>
+          <button @click="activeTab = 'live-logs'" :class="activeTab === 'live-logs' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200'" class="flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg transition active:scale-95 cursor-pointer">
+            <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            <span>Live Logs</span>
+          </button>
+        </nav>
+
+        <!-- Live Telemetry Badges & Refresh -->
+        <div class="flex items-center gap-2 text-xs">
+          <div class="hidden sm:flex items-center gap-2">
+            <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
+              <span :class="metrics.redisStatus === 'connected' ? 'bg-emerald-400' : 'bg-amber-400'" class="w-2 h-2 rounded-full"></span>
+              <span class="text-zinc-400">Redis:</span>
+              <span :class="metrics.redisStatus === 'connected' ? 'text-emerald-400' : 'text-amber-400'" class="font-mono font-medium">{{ metrics.redisStatus }}</span>
             </div>
+            <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
+              <span class="text-zinc-400">WA Core:</span>
+              <span class="text-emerald-400 font-medium font-mono">{{ metrics.waVersion }}</span>
+            </div>
+            <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
+              <span class="text-zinc-400">Retention:</span>
+              <span class="text-zinc-300 font-mono">{{ metrics.retention }}</span>
+            </div>
+          </div>
+          <button @click="manualRefreshAll" class="p-2 rounded-xl card-surface hover:bg-zinc-800 text-zinc-300 hover:text-white transition active:scale-95 cursor-pointer min-h-[38px] min-w-[38px] flex items-center justify-center" title="Refresh Telemetry & Sessions">
+            <svg :class="{ 'animate-spin': metrics.isRefreshing }" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          </button>
+        </div>
 
-            <div class="space-y-3">
-              <div>
-                <label class="block text-xs font-medium text-zinc-400 mb-1">Session Identifier (Tenant ID)</label>
-                <input type="text" id="new-session-id" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-sm font-mono placeholder:text-zinc-600" value="tenant-botla-1">
+      </div>
+    </header>
+
+    <!-- Main Content Stage -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
+
+      <!-- ========================================================================= -->
+      <!-- TAB 1: SESSIONS / BALANCED OPERATIONAL DASHBOARD OVERVIEW                 -->
+      <!-- ========================================================================= -->
+      <section v-if="activeTab === 'sessions'" class="space-y-6">
+        
+        <!-- Top Overview Stats Ribbon -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+          <div class="card-surface rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:gap-3">
+            <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0">
+              <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-[10px] sm:text-[11px] text-zinc-400 truncate">Active Sockets</p>
+              <p class="text-xs sm:text-base font-bold text-white font-mono leading-tight">{{ metrics.activeSockets }}</p>
+            </div>
+          </div>
+
+          <div class="card-surface rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:gap-3">
+            <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center flex-shrink-0">
+              <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-[10px] sm:text-[11px] text-zinc-400 truncate">Persistence</p>
+              <p class="text-xs sm:text-xs font-semibold text-zinc-200 font-mono leading-tight truncate">{{ metrics.statePersistence }}</p>
+            </div>
+          </div>
+
+          <div class="card-surface rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:gap-3">
+            <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center flex-shrink-0">
+              <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-[10px] sm:text-[11px] text-zinc-400 truncate">Anti-Ban</p>
+              <p class="text-xs sm:text-xs font-semibold text-emerald-400 font-mono leading-tight truncate">{{ metrics.antiBan }}</p>
+            </div>
+          </div>
+
+          <div class="card-surface rounded-xl sm:rounded-2xl p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:gap-3">
+            <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center flex-shrink-0">
+              <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="text-[10px] sm:text-[11px] text-zinc-400 truncate">Gateway</p>
+              <p class="text-xs sm:text-xs font-semibold text-emerald-400 font-mono leading-tight flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
+                <span class="truncate">{{ metrics.gatewayStatus }}</span>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dashboard Modules Bento Layout -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          
+          <!-- Left Column (lg:col-span-5): Boot Session & Webhook Target -->
+          <div class="lg:col-span-5 space-y-6">
+            
+            <!-- Module 1: Boot Tenant Session Form -->
+            <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm border border-zinc-800/60">
+              <div class="flex items-center justify-between">
+                <h2 class="font-bold text-white text-sm flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span>Boot Tenant Session</span>
+                </h2>
+                <span class="text-[11px] text-zinc-500 font-mono">Multi-Tenant</span>
               </div>
 
-              <div>
-                <span class="block text-[11px] text-zinc-500 mb-1.5">Quick Tenant Presets:</span>
-                <div class="flex items-center gap-2 flex-wrap">
-                  <button type="button" onclick="window.setSessionInput('tenant-botla-1')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-300 hover:text-white hover:border-zinc-600 transition cursor-pointer">tenant-1</button>
-                  <button type="button" onclick="window.setSessionInput('tenant-botla-2')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-300 hover:text-white hover:border-zinc-600 transition cursor-pointer">tenant-2</button>
-                  <button type="button" onclick="window.setSessionInput('tenant-support')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-300 hover:text-white hover:border-zinc-600 transition cursor-pointer">support</button>
+              <div class="space-y-3">
+                <div>
+                  <label class="block text-xs font-medium text-zinc-400 mb-1">Session Identifier (Tenant ID)</label>
+                  <input type="text" v-model="newTenantId" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-sm font-mono placeholder:text-zinc-600">
+                </div>
+
+                <div>
+                  <span class="block text-[11px] text-zinc-500 mb-1.5">Quick Tenant Presets:</span>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <button type="button" @click="setSessionInput('tenant-botla-1')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-300 hover:text-white hover:border-zinc-600 transition cursor-pointer">tenant-1</button>
+                    <button type="button" @click="setSessionInput('tenant-botla-2')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-300 hover:text-white hover:border-zinc-600 transition cursor-pointer">tenant-2</button>
+                    <button type="button" @click="setSessionInput('tenant-support')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-300 hover:text-white hover:border-zinc-600 transition cursor-pointer">support</button>
+                  </div>
+                </div>
+
+                <button @click="initSession" :disabled="isBooting" class="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 cursor-pointer min-h-[44px]">
+                  <svg v-if="!isBooting" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                  <svg v-else class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                  <span>{{ isBooting ? 'Booting Session...' : 'Boot Session' }}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Module 2: HMAC Webhook Relay Target Card -->
+            <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-3 shadow-sm border border-zinc-800/60">
+              <div class="flex items-center justify-between">
+                <h2 class="font-bold text-white text-xs flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                  <span>HMAC Webhook Relay Target</span>
+                </h2>
+                <div class="flex items-center gap-2">
+                  <span :class="webhookModal.enabled ? 'text-emerald-400 bg-emerald-950/60 border-emerald-800' : 'text-slate-400 bg-slate-900 border-slate-700'" class="px-2 py-0.5 border rounded text-xs font-mono">
+                    {{ webhookModal.enabled ? 'Active' : 'Disabled' }}
+                  </span>
+                  <button @click="openWebhookSettingsModal" class="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-medium transition cursor-pointer flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    <span>Configure</span>
+                  </button>
                 </div>
               </div>
-
-              <button id="btn-init-session" onclick="window.initSession()" class="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 cursor-pointer min-h-[44px]">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                <span>Boot Session</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Module 2: HMAC Webhook Relay Target card -->
-          <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-3 shadow-sm border border-zinc-800/60">
-            <div class="flex items-center justify-between">
-              <h2 class="font-bold text-white text-xs flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
-                <span>HMAC Webhook Relay Target</span>
-              </h2>
-              <span class="text-[10px] px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">SHA256</span>
-            </div>
-            <p class="text-[11px] text-zinc-400">All inbound messages, events, and message ACKs are signed with <code class="text-indigo-300 font-mono">X-Botla-Signature</code> and forwarded to your Laravel core:</p>
-            <div class="p-3 rounded-xl bg-zinc-950/80 border border-zinc-900 font-mono text-[11px] text-zinc-400 break-all flex items-center justify-between gap-2">
-              <span id="webhook-target">http://localhost:8000/api/whatsapp/webhook</span>
-              <button onclick="window.copyWebhookUrl()" class="p-1.5 text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 min-h-[36px] min-w-[36px] flex items-center justify-center" title="Copy Webhook URL">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
-              </button>
-            </div>
-          </div>
-
-        </div>
-
-        <!-- Right Column (lg:col-span-7): Active Sessions Pool -->
-        <div class="lg:col-span-7 space-y-6">
-
-          <!-- Module 3: Active Sessions Grid/List -->
-          <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm border border-zinc-800/60">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <h2 class="font-bold text-white text-sm">Active Sessions</h2>
-                <span id="sessions-count-badge" class="px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 text-xs font-mono font-medium">0</span>
+              <p class="text-[11px] text-zinc-400">All inbound messages and ACKs are signed with <code class="text-indigo-300 font-mono">X-Botla-Signature</code> and forwarded to:</p>
+              <div class="p-3 rounded-xl bg-zinc-950/80 border border-zinc-900 font-mono text-[11px] text-zinc-300 break-all flex items-center justify-between gap-2">
+                <span class="truncate">{{ webhookModal.url || 'Not configured' }}</span>
+                <button @click="copyToClipboard(webhookModal.url, webhookModal)" class="p-1.5 text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 min-h-[36px] min-w-[36px] flex items-center justify-center flex-shrink-0" title="Copy Webhook URL">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
+                </button>
               </div>
-              <button onclick="window.loadSessions()" class="text-xs text-zinc-400 hover:text-white transition flex items-center gap-1 cursor-pointer py-1 px-2 rounded-lg hover:bg-zinc-800">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                <span>Sync</span>
-              </button>
-            </div>
-
-            <div id="sessions-container" class="space-y-3">
-              <div class="p-8 text-center text-zinc-500 text-sm">Loading active sessions...</div>
-            </div>
-          </div>
-
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ========================================================================= -->
-    <!-- TAB 2: CONSOLE / OUTBOUND MESSAGE & MEDIA DISPATCHER                    -->
-    <!-- ========================================================================= -->
-    <section id="section-sender" class="hidden space-y-6 max-w-4xl mx-auto">
-      
-      <!-- Quick Test Message Sender Card -->
-      <div class="card-surface rounded-2xl p-4 sm:p-6 space-y-4 shadow-sm border border-zinc-800/60 border-l-2 border-l-emerald-500">
-        <div class="flex items-center justify-between pb-3 border-b border-zinc-800/80">
-          <div class="flex items-center gap-2.5">
-            <div class="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center flex-shrink-0">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-            </div>
-            <div>
-              <h3 class="font-bold text-white text-sm sm:text-base">Quick Test Message Sender</h3>
-              <p class="text-[11px] text-zinc-400">Dispatch a live test message to verify Baileys socket link</p>
-            </div>
-          </div>
-          <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">Live Socket</span>
-        </div>
-
-        <form id="quick-send-form" class="space-y-3.5">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID (Tenant ID)</label>
-              <input type="text" id="quick-send-session-id" list="active-sessions-datalist" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="tenant-botla-1" required>
-              <datalist id="active-sessions-datalist"></datalist>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / JID</label>
-              <input type="text" id="quick-send-jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="6281234567890@s.whatsapp.net" required>
-            </div>
-          </div>
-
-          <div>
-            <div class="flex items-center justify-between mb-1.5 flex-wrap gap-1">
-              <label class="block text-xs font-medium text-zinc-400">Message Content</label>
-              <div class="flex items-center gap-1.5 text-[11px]">
-                <button type="button" onclick="window.setQuickSendTemplate('Hello from Botla WhatsApp Gateway! 🚀')" class="text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-zinc-800/60 cursor-pointer">Greeting</button>
-                <button type="button" onclick="window.setQuickSendTemplate('Your verification code is: *839102* 🔐')" class="text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-zinc-800/60 cursor-pointer">OTP</button>
-                <button type="button" onclick="window.setQuickSendTemplate('WhatsApp Gateway operational test passed ✅')" class="text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-zinc-800/60 cursor-pointer">Alert</button>
+              <!-- Retry Stats Summary -->
+              <div class="grid grid-cols-3 gap-2 pt-1 text-[11px]">
+                <div class="p-2 rounded-lg bg-zinc-950/60 border border-zinc-900 text-center">
+                  <span class="text-zinc-500 block text-[10px]">Total Sent</span>
+                  <span class="font-mono text-zinc-200 font-semibold">{{ webhookModal.stats.totalSent }}</span>
+                </div>
+                <div class="p-2 rounded-lg bg-zinc-950/60 border border-zinc-900 text-center">
+                  <span class="text-zinc-500 block text-[10px]">Success</span>
+                  <span class="font-mono text-emerald-400 font-semibold">{{ webhookModal.stats.success }}</span>
+                </div>
+                <div class="p-2 rounded-lg bg-zinc-950/60 border border-zinc-900 text-center">
+                  <span class="text-zinc-500 block text-[10px]">Failures</span>
+                  <span class="font-mono text-rose-400 font-semibold">{{ webhookModal.stats.failures }}</span>
+                </div>
               </div>
             </div>
-            <textarea id="quick-send-text" rows="2" placeholder="Type test message..." class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs" required>Hello from Botla WhatsApp Gateway! 🚀</textarea>
+
           </div>
 
-          <div class="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/60 border border-zinc-900 text-[11px]">
-            <div class="flex items-center gap-1.5 text-zinc-400">
-              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Anti-ban typing presence (600–1400ms delay)</span>
+          <!-- Right Column (lg:col-span-7): Active Sessions Pool -->
+          <div class="lg:col-span-7 space-y-6">
+
+            <!-- Active Sessions Header & List -->
+            <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm border border-zinc-800/60">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <h2 class="font-bold text-white text-sm">Active Sessions</h2>
+                  <span class="px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 text-xs font-mono font-medium">{{ sessions.length }}</span>
+                </div>
+                <button @click="fetchSessions" class="text-xs text-zinc-400 hover:text-white transition flex items-center gap-1 cursor-pointer py-1 px-2 rounded-lg hover:bg-zinc-800">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                  <span>Sync</span>
+                </button>
+              </div>
+
+              <!-- Sessions Loop -->
+              <div class="space-y-3">
+                
+                <!-- If No Sessions -->
+                <div v-if="sessions.length === 0" class="p-8 text-center rounded-xl bg-zinc-950/60 border border-zinc-800/80 text-zinc-500 text-sm space-y-2">
+                  <div class="w-10 h-10 mx-auto rounded-full bg-zinc-900 flex items-center justify-center text-zinc-600">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                  </div>
+                  <p class="font-medium text-zinc-400">No Active Sessions</p>
+                  <p class="text-xs text-zinc-500">Initialize a tenant session on the left to connect your WhatsApp account.</p>
+                </div>
+
+                <!-- Session Cards -->
+                <div v-for="session in sessions" :key="session.id || session.sessionId" class="p-4 rounded-xl bg-zinc-900/90 border border-zinc-800/80 hover:border-zinc-700/80 transition-all space-y-3">
+                  
+                  <!-- Card Header & Status -->
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="flex items-center gap-3 min-w-0">
+                      <div class="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center flex-shrink-0 relative">
+                        <svg class="w-4 h-4 text-zinc-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                        <span :class="{
+                          'bg-emerald-400': session.status === 'connected',
+                          'bg-indigo-400 animate-ping': session.status === 'qr_ready',
+                          'bg-amber-400 animate-pulse': session.status === 'connecting',
+                          'bg-zinc-600': session.status !== 'connected' && session.status !== 'qr_ready' && session.status !== 'connecting'
+                        }" class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full"></span>
+                      </div>
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="font-mono text-white text-sm font-semibold truncate">{{ session.id || session.sessionId }}</span>
+                          
+                          <!-- Dynamic Status Badges -->
+                          <span v-if="session.status === 'connected'" class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs px-2 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            Connected
+                          </span>
+                          <span v-else-if="session.status === 'qr_ready'" class="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xs px-2 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                            <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping"></span>
+                            QR Ready
+                          </span>
+                          <span v-else-if="session.status === 'connecting'" class="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs px-2 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                            <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                            Connecting
+                          </span>
+                          <span v-else class="bg-zinc-800 text-zinc-400 border border-zinc-700/60 text-xs px-2 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                            <span class="w-1.5 h-1.5 rounded-full bg-zinc-500"></span>
+                            {{ session.status === 'logged_out' ? 'Logged Out' : 'Disconnected' }}
+                          </span>
+                        </div>
+
+                        <!-- Target Phone / JID details -->
+                        <div class="text-xs text-zinc-400 truncate mt-1 flex items-center gap-1.5 flex-wrap">
+                          <span class="text-zinc-500 flex items-center gap-1 flex-shrink-0">
+                            <span>📞</span>
+                            <span>Target:</span>
+                          </span>
+                          <span class="text-zinc-300 font-mono truncate max-w-[200px] sm:max-w-xs">{{ formatSessionTarget(session.user || session.phone) }}</span>
+                          <span v-if="session.lastActiveAt && session.status === 'connected'" class="text-zinc-600">·</span>
+                          <span v-if="session.lastActiveAt && session.status === 'connected'" class="text-zinc-500 text-[11px] font-mono">Active {{ getRelativeTime(session.lastActiveAt) }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Declarative Action Buttons (Strict Mobile-First Spacing & Sizing) -->
+                  <!-- If connected: Test Send, Logout, Purge -->
+                  <div v-if="session.status === 'connected'" class="grid grid-cols-3 gap-2 pt-1">
+                    <button @click="openTestSend(session)" class="min-h-[42px] px-2.5 rounded-xl border border-zinc-700/80 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
+                      <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                      <span>Test Send</span>
+                    </button>
+                    <button @click="openLogoutModal(session.id || session.sessionId)" class="min-h-[42px] px-2.5 rounded-xl border border-amber-900/40 bg-amber-950/20 hover:bg-amber-900/40 text-amber-300 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
+                      <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                      <span>Logout</span>
+                    </button>
+                    <button @click="openPurgeModal(session.id || session.sessionId)" class="min-h-[42px] px-2.5 rounded-xl border border-rose-900/40 bg-rose-950/20 hover:bg-rose-900/40 text-rose-300 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
+                      <svg class="w-3.5 h-3.5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                      <span>Purge</span>
+                    </button>
+                  </div>
+
+                  <!-- If awaiting authentication: Pair Device, Purge -->
+                  <div v-else class="grid grid-cols-2 gap-2 pt-1">
+                    <button @click="openPairing(session, 'phone')" class="min-h-[42px] px-3 rounded-xl border border-indigo-700/60 bg-indigo-950/40 hover:bg-indigo-900/50 text-indigo-200 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
+                      <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+                      <span>Pair Device</span>
+                    </button>
+                    <button @click="openPurgeModal(session.id || session.sessionId)" class="min-h-[42px] px-3 rounded-xl border border-rose-900/40 bg-rose-950/20 hover:bg-rose-900/40 text-rose-300 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
+                      <svg class="w-3.5 h-3.5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                      <span>Purge</span>
+                    </button>
+                  </div>
+
+                </div>
+
+              </div>
             </div>
-            <span class="text-zinc-500 font-mono text-[10px]">composing state</span>
+
           </div>
 
-          <button type="submit" id="btn-quick-send" class="w-full py-3 px-4 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-sm cursor-pointer min-h-[44px]">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-            <span>Send Test Message</span>
-          </button>
-          <div id="quick-send-status" class="text-xs text-center min-h-[16px]"></div>
-        </form>
-      </div>
+        </div>
+      </section>
 
-      <!-- Advanced Outbound Dispatcher Card -->
-      <div class="card-surface rounded-2xl p-4 sm:p-6 space-y-5 shadow-sm border border-zinc-800/60">
+      <!-- ========================================================================= -->
+      <!-- TAB 2: CONSOLE / OUTBOUND MESSAGE & MEDIA DISPATCHER                      -->
+      <!-- ========================================================================= -->
+      <section v-if="activeTab === 'console'" class="space-y-6 max-w-4xl mx-auto">
         
-        <!-- Header & Tab Toggle -->
-        <div class="flex items-center justify-between pb-3 border-b border-zinc-800/80 flex-wrap gap-3">
-          <div>
-            <h2 class="font-bold text-white text-base">Advanced Outbound Dispatcher</h2>
-            <p class="text-xs text-zinc-400">Enforces human typing presence, delays, and MIME binary attachments</p>
-          </div>
-          <div class="flex p-1 bg-zinc-900/90 rounded-xl border border-zinc-800">
-            <button id="tab-btn-text" onclick="window.switchSendTab('text')" class="px-3.5 py-2 rounded-lg text-xs font-semibold bg-zinc-800 text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5 min-h-[38px]">
-              <span>Text Message</span>
-            </button>
-            <button id="tab-btn-media" onclick="window.switchSendTab('media')" class="px-3.5 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5 min-h-[38px]">
-              <span>Media Attachment</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Text Message Form -->
-        <form id="send-form" class="space-y-4">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID (Tenant ID)</label>
-              <input type="text" id="send-session-id" list="active-sessions-datalist" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="tenant-botla-1" required>
-            </div>
-
-            <div>
-              <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / WhatsApp JID</label>
-              <input type="text" id="send-jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="6281234567890@s.whatsapp.net" required>
-            </div>
-          </div>
-
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <label class="block text-xs font-medium text-zinc-400">Message Content</label>
-              <div class="flex items-center gap-1.5 text-[10px]">
-                <button type="button" onclick="window.setSendTemplate('Hello from Botla WhatsApp Gateway! 🚀')" class="text-zinc-500 hover:text-zinc-300">Preset 1</button>
-                <span class="text-zinc-600">·</span>
-                <button type="button" onclick="window.setSendTemplate('Your verification OTP code is: *839102* 🔐')" class="text-zinc-500 hover:text-zinc-300">OTP</button>
+        <!-- Quick Test Message Sender Card -->
+        <div class="card-surface rounded-2xl p-4 sm:p-6 space-y-4 shadow-sm border border-zinc-800/60 border-l-2 border-l-emerald-500">
+          <div class="flex items-center justify-between pb-3 border-b border-zinc-800/80">
+            <div class="flex items-center gap-2.5">
+              <div class="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+              </div>
+              <div>
+                <h3 class="font-bold text-white text-sm sm:text-base">Quick Test Message Sender</h3>
+                <p class="text-[11px] text-zinc-400">Dispatch a live test message to verify Baileys socket link</p>
               </div>
             </div>
-            <textarea id="send-text" rows="4" placeholder="Type your WhatsApp message..." class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs" required>Hello from Botla WhatsApp Gateway! 🚀</textarea>
+            <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">Live Socket</span>
           </div>
 
-          <div class="p-3.5 rounded-xl bg-zinc-950/60 border border-zinc-900 text-[11px] space-y-1">
-            <div class="flex items-center justify-between text-zinc-400">
-              <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Presence Simulation</span>
-              <span class="font-mono text-zinc-500">600ms - 1400ms</span>
-            </div>
-            <p class="text-[10px] text-zinc-500">Auto-sends `composing` state before message dispatch to emulate genuine user typing.</p>
-          </div>
-
-          <button type="submit" id="btn-send" class="w-full py-3 px-4 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-sm cursor-pointer min-h-[44px]">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-            <span>Send via Gateway</span>
-          </button>
-          <div id="send-status" class="text-xs text-center min-h-[16px]"></div>
-        </form>
-
-        <!-- Media Message Form -->
-        <form id="send-media-form" class="space-y-4 hidden">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID (Tenant ID)</label>
-              <input type="text" id="media-session-id" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="tenant-botla-1" required>
+          <form @submit.prevent="sendQuickMessage" class="space-y-3.5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID (Tenant ID)</label>
+                <input type="text" v-model="quickSend.sessionId" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" required>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / JID</label>
+                <input type="text" v-model="quickSend.jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" required>
+              </div>
             </div>
 
             <div>
-              <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / WhatsApp JID</label>
-              <input type="text" id="media-jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="6281234567890@s.whatsapp.net" required>
+              <div class="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                <label class="block text-xs font-medium text-zinc-400">Message Content</label>
+                <div class="flex items-center gap-1.5 text-[11px]">
+                  <button type="button" @click="quickSend.text = 'Hello from Botla WhatsApp Gateway! 🚀'" class="text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-zinc-800/60 cursor-pointer">Greeting</button>
+                  <button type="button" @click="quickSend.text = 'Your verification code is: *839102* 🔐'" class="text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-zinc-800/60 cursor-pointer">OTP</button>
+                  <button type="button" @click="quickSend.text = 'WhatsApp Gateway operational test passed ✅'" class="text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-zinc-800/60 cursor-pointer">Alert</button>
+                </div>
+              </div>
+              <textarea v-model="quickSend.text" rows="2" placeholder="Type test message..." class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs" required></textarea>
+            </div>
+
+            <div class="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/60 border border-zinc-900 text-[11px]">
+              <div class="flex items-center gap-1.5 text-zinc-400">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Anti-ban typing presence (600–1400ms delay)</span>
+              </div>
+              <span class="text-zinc-500 font-mono text-[10px]">composing state</span>
+            </div>
+
+            <button type="submit" :disabled="quickSend.isSending" class="w-full py-3 px-4 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-sm cursor-pointer min-h-[44px]">
+              <svg v-if="!quickSend.isSending" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+              <svg v-else class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+              <span>{{ quickSend.isSending ? 'Sending...' : 'Send Test Message' }}</span>
+            </button>
+            <div v-if="quickSend.status" :class="quickSend.statusType === 'success' ? 'text-emerald-400' : 'text-rose-400'" class="text-xs text-center min-h-[16px]">
+              {{ quickSend.status }}
+            </div>
+          </form>
+        </div>
+
+        <!-- Advanced Outbound Dispatcher Card -->
+        <div class="card-surface rounded-2xl p-4 sm:p-6 space-y-5 shadow-sm border border-zinc-800/60">
+          
+          <div class="flex items-center justify-between pb-3 border-b border-zinc-800/80 flex-wrap gap-3">
+            <div>
+              <h2 class="font-bold text-white text-base">Advanced Outbound Dispatcher</h2>
+              <p class="text-xs text-zinc-400">Enforces human typing presence, delays, and MIME binary attachments</p>
+            </div>
+            <div class="flex p-1 bg-zinc-900/90 rounded-xl border border-zinc-800">
+              <button @click="consoleTab = 'text'" :class="consoleTab === 'text' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'" class="px-3.5 py-2 rounded-lg text-xs font-semibold cursor-pointer transition active:scale-95 flex items-center gap-1.5 min-h-[38px]">
+                <span>Text Message</span>
+              </button>
+              <button @click="consoleTab = 'media'" :class="consoleTab === 'media' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'" class="px-3.5 py-2 rounded-lg text-xs font-semibold cursor-pointer transition active:scale-95 flex items-center gap-1.5 min-h-[38px]">
+                <span>Media Attachment</span>
+              </button>
             </div>
           </div>
 
-          <div>
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Media Type</label>
-            <select id="media-type" onchange="window.toggleMediaFields()" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs cursor-pointer min-h-[42px]">
-              <option value="image">Image (JPEG/PNG/WebP)</option>
-              <option value="document">Document / PDF</option>
-              <option value="audio">Audio / Voice Note (PTT)</option>
-            </select>
+          <!-- Text Message Form -->
+          <form v-if="consoleTab === 'text'" @submit.prevent="sendAdvancedMessage" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID (Tenant ID)</label>
+                <input type="text" v-model="advancedSend.sessionId" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" required>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / WhatsApp JID</label>
+                <input type="text" v-model="advancedSend.jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" required>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-medium text-zinc-400">Message Content</label>
+                <div class="flex items-center gap-1.5 text-[10px]">
+                  <button type="button" @click="advancedSend.text = 'Hello from Botla WhatsApp Gateway! 🚀'" class="text-zinc-500 hover:text-zinc-300">Preset 1</button>
+                  <span class="text-zinc-600">·</span>
+                  <button type="button" @click="advancedSend.text = 'Your verification OTP code is: *839102* 🔐'" class="text-zinc-500 hover:text-zinc-300">OTP</button>
+                </div>
+              </div>
+              <textarea v-model="advancedSend.text" rows="4" placeholder="Type your WhatsApp message..." class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs" required></textarea>
+            </div>
+
+            <div class="p-3.5 rounded-xl bg-zinc-950/60 border border-zinc-900 text-[11px] space-y-1">
+              <div class="flex items-center justify-between text-zinc-400">
+                <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Presence Simulation</span>
+                <span class="font-mono text-zinc-500">600ms - 1400ms</span>
+              </div>
+              <p class="text-[10px] text-zinc-500">Auto-sends `composing` state before message dispatch to emulate genuine user typing.</p>
+            </div>
+
+            <button type="submit" :disabled="advancedSend.isSending" class="w-full py-3 px-4 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-sm cursor-pointer min-h-[44px]">
+              <svg v-if="!advancedSend.isSending" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+              <svg v-else class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+              <span>{{ advancedSend.isSending ? 'Sending...' : 'Send via Gateway' }}</span>
+            </button>
+            <div v-if="advancedSend.status" :class="advancedSend.statusType === 'success' ? 'text-emerald-400' : 'text-rose-400'" class="text-xs text-center min-h-[16px]">
+              {{ advancedSend.status }}
+            </div>
+          </form>
+
+          <!-- Media Message Form -->
+          <form v-if="consoleTab === 'media'" @submit.prevent="sendMediaMessage" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID (Tenant ID)</label>
+                <input type="text" v-model="mediaSend.sessionId" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" required>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / WhatsApp JID</label>
+                <input type="text" v-model="mediaSend.jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" required>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Media Type</label>
+              <select v-model="mediaSend.type" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs cursor-pointer min-h-[42px]">
+                <option value="image">Image (JPEG/PNG/WebP)</option>
+                <option value="document">Document / PDF</option>
+                <option value="audio">Audio / Voice Note (PTT)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Direct Media URL</label>
+              <input type="url" v-model="mediaSend.url" placeholder="https://example.com/invoice.pdf" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" required>
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Caption (Optional)</label>
+              <input type="text" v-model="mediaSend.caption" placeholder="Here is your attached receipt." class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs">
+            </div>
+
+            <div v-if="mediaSend.type === 'document'">
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Custom Filename</label>
+              <input type="text" v-model="mediaSend.filename" placeholder="monthly-statement.pdf" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono">
+            </div>
+
+            <div v-if="mediaSend.type === 'audio'" class="flex items-center gap-2 p-3 rounded-xl bg-zinc-900 border border-zinc-800">
+              <input type="checkbox" id="media-ptt" v-model="mediaSend.ptt" class="rounded bg-zinc-800 border-zinc-700 text-emerald-500 focus:ring-0">
+              <label for="media-ptt" class="text-xs text-zinc-300 select-none">Send as Push-To-Talk (Voice Note with waveform)</label>
+            </div>
+
+            <button type="submit" :disabled="mediaSend.isSending" class="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 cursor-pointer min-h-[44px]">
+              <svg v-if="!mediaSend.isSending" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+              <svg v-else class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+              <span>{{ mediaSend.isSending ? 'Dispatching Media...' : 'Dispatch Media Attachment' }}</span>
+            </button>
+            <div v-if="mediaSend.status" :class="mediaSend.statusType === 'success' ? 'text-emerald-400' : 'text-rose-400'" class="text-xs text-center min-h-[16px]">
+              {{ mediaSend.status }}
+            </div>
+          </form>
+
+        </div>
+      </section>
+
+      <!-- ========================================================================= -->
+      <!-- TAB 3: LIVE LOGS & DEEP TELEMETRY DIAGNOSTICS                             -->
+      <!-- ========================================================================= -->
+      <section v-if="activeTab === 'live-logs'" class="space-y-6 max-w-6xl mx-auto">
+        <div class="card-surface rounded-2xl p-4 sm:p-6 space-y-4 shadow-sm flex flex-col h-full min-h-[620px]">
+          
+          <!-- Stream Sub-Navigation Tabs -->
+          <div class="flex items-center justify-between pb-3 border-b border-zinc-800 flex-wrap gap-2">
+            <div class="flex p-1 bg-zinc-900/90 rounded-xl border border-zinc-800 text-xs font-semibold">
+              <button @click="liveLogTab = 'logs'" :class="liveLogTab === 'logs' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'" class="px-3.5 py-1.5 rounded-lg cursor-pointer transition active:scale-95 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Pino Logs</span>
+              </button>
+              <button @click="liveLogTab = 'events'" :class="liveLogTab === 'events' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'" class="px-3.5 py-1.5 rounded-lg cursor-pointer transition active:scale-95 flex items-center gap-1.5">
+                <span>Gateway Events</span>
+              </button>
+            </div>
+            <div class="text-emerald-400 text-xs font-mono flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> SSE Active Stream
+            </div>
           </div>
 
-          <div>
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Direct Media URL</label>
-            <input type="url" id="media-url" placeholder="https://example.com/invoice.pdf" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=400" required>
+          <!-- Subview 1: Pino Structured Logs (SSE) -->
+          <div v-if="liveLogTab === 'logs'" class="flex-1 flex flex-col space-y-3">
+            
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <!-- Level Filters -->
+              <div class="flex items-center gap-1 bg-zinc-900/90 p-1 rounded-lg border border-zinc-800 text-[11px]">
+                <button @click="logLevelFilter = 'all'" :class="logLevelFilter === 'all' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'" class="px-2.5 py-1 rounded-lg cursor-pointer">All</button>
+                <button @click="logLevelFilter = 'info'" :class="logLevelFilter === 'info' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'" class="px-2.5 py-1 rounded-lg cursor-pointer">Info</button>
+                <button @click="logLevelFilter = 'warn'" :class="logLevelFilter === 'warn' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'" class="px-2.5 py-1 rounded-lg cursor-pointer">Warn</button>
+                <button @click="logLevelFilter = 'error'" :class="logLevelFilter === 'error' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'" class="px-2.5 py-1 rounded-lg cursor-pointer">Error</button>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                <button @click="copyAllLogs('text')" class="px-3 py-1 text-xs rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 transition cursor-pointer flex items-center gap-1.5 min-h-[32px]">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
+                  <span>Copy Logs</span>
+                </button>
+                <button @click="copyAllLogs('json')" class="px-3 py-1 text-xs rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition cursor-pointer flex items-center gap-1.5 min-h-[32px]">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                  <span>Copy JSON</span>
+                </button>
+                <button @click="logsPaused = !logsPaused" :class="logsPaused ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'" class="px-3 py-1 text-xs rounded-lg transition cursor-pointer min-h-[32px]">
+                  {{ logsPaused ? 'Resume' : 'Pause' }}
+                </button>
+                <button @click="clearLogs" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer min-h-[32px]">
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <!-- Filter Input & Autoscroll -->
+            <div class="flex items-center justify-between gap-2">
+              <input type="text" v-model="logSessionFilter" placeholder="Filter logs by Session ID or text..." class="w-full input-base px-3 py-1.5 rounded-lg text-xs font-mono placeholder:text-zinc-600">
+              <label class="flex items-center gap-1.5 text-xs text-zinc-400 select-none whitespace-nowrap cursor-pointer">
+                <input type="checkbox" v-model="autoScroll" class="rounded bg-zinc-800 border-zinc-700 text-emerald-500 focus:ring-0">
+                <span>Auto-scroll</span>
+              </label>
+            </div>
+
+            <!-- Scrollable Logs Stream Feed -->
+            <div id="log-stream-container" class="flex-1 bg-zinc-950/80 rounded-xl p-3 border border-zinc-900 overflow-y-auto max-h-[440px] space-y-2 font-mono">
+              <div v-if="filteredLogs.length === 0" class="text-zinc-600 text-center py-12 text-xs font-sans">
+                {{ logs.length === 0 ? 'Connecting to live log stream...' : 'No logs matching filter criteria.' }}
+              </div>
+
+              <div v-for="(log, idx) in filteredLogs" :key="log.id || idx" class="p-2.5 rounded-xl bg-zinc-950/90 border border-zinc-900/90 hover:border-zinc-800 transition-colors space-y-1.5">
+                <div class="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+                  <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
+                    <span :class="{
+                      'bg-cyan-500/15 text-cyan-400 border-cyan-500/30': (log.level || 'info').toLowerCase() === 'info',
+                      'bg-amber-500/15 text-amber-400 border-amber-500/30': (log.level || '').toLowerCase() === 'warn',
+                      'bg-rose-500/15 text-rose-400 border-rose-500/30': (log.level || '').toLowerCase() === 'error' || (log.level || '').toLowerCase() === 'fatal',
+                      'bg-zinc-800 text-zinc-400 border-zinc-700': (log.level || '').toLowerCase() === 'debug'
+                    }" class="px-1.5 py-0.5 rounded text-[10px] uppercase font-bold border font-mono">
+                      {{ log.level || 'INFO' }}
+                    </span>
+                    <span v-if="log.sessionId" class="px-1.5 py-0.5 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-800/40 text-[10px] font-mono truncate max-w-[140px]">
+                      [{{ log.sessionId }}]
+                    </span>
+                  </div>
+
+                  <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <span class="text-[10px] text-zinc-500 font-mono">{{ getRelativeTime(log.timestamp) }}</span>
+                    <div class="flex items-center gap-1">
+                      <button @click="copyToClipboard(stripAnsi(log.message || ''))" class="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 cursor-pointer transition" title="Copy message text">
+                        Msg
+                      </button>
+                      <button @click="copyToClipboard(log)" class="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 cursor-pointer transition" title="Copy log JSON">
+                        JSON
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="text-zinc-200 text-xs font-mono break-words leading-relaxed">
+                  {{ stripAnsi(log.message || '') }}
+                </div>
+
+                <!-- Structured Metadata Accordion -->
+                <div v-if="log.meta && Object.keys(log.meta).length > 0" class="pt-0.5">
+                  <button @click="log.expanded = !log.expanded" class="text-[10px] text-zinc-500 hover:text-zinc-300 cursor-pointer flex items-center gap-1 font-mono select-none">
+                    <svg :class="{ 'rotate-90': log.expanded }" class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    <span>{{ log.expanded ? 'Hide Payload' : 'Show Payload' }}</span>
+                  </button>
+                  <pre v-if="log.expanded" class="mt-1 p-2 rounded-lg bg-black/80 border border-zinc-900 text-[10px] text-cyan-300 overflow-x-auto font-mono whitespace-pre max-h-40 overflow-y-auto">{{ log.meta }}</pre>
+                </div>
+              </div>
+            </div>
+
+            <div class="text-xs text-zinc-500 font-mono text-right">
+              {{ filteredLogs.length }} logs displayed
+            </div>
           </div>
 
-          <div id="caption-container">
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Caption (Optional)</label>
-            <input type="text" id="media-caption" placeholder="Here is your attached receipt." class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs">
+          <!-- Subview 2: Gateway Events Feed -->
+          <div v-if="liveLogTab === 'events'" class="flex-1 flex flex-col space-y-3">
+            
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <!-- Event Filters -->
+              <div class="flex items-center gap-1 bg-zinc-900/90 p-1 rounded-lg border border-zinc-800 text-xs overflow-x-auto scrollbar-none">
+                <button @click="eventFilter = 'all'" :class="eventFilter === 'all' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'" class="px-2.5 py-1 rounded-lg cursor-pointer">All</button>
+                <button @click="eventFilter = 'inbound'" :class="eventFilter === 'inbound' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'" class="px-2.5 py-1 rounded-lg cursor-pointer">Inbound</button>
+                <button @click="eventFilter = 'outbound'" :class="eventFilter === 'outbound' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'" class="px-2.5 py-1 rounded-lg cursor-pointer">Outbound</button>
+                <button @click="eventFilter = 'ack'" :class="eventFilter === 'ack' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'" class="px-2.5 py-1 rounded-lg cursor-pointer">ACKs</button>
+                <button @click="eventFilter = 'webhook'" :class="eventFilter === 'webhook' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'" class="px-2.5 py-1 rounded-lg cursor-pointer">Webhooks</button>
+                <button @click="eventFilter = 'session'" :class="eventFilter === 'session' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'" class="px-2.5 py-1 rounded-lg cursor-pointer">Sessions</button>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                <button @click="copyAllEvents" class="px-3 py-1 text-xs rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 transition cursor-pointer flex items-center gap-1.5 min-h-[32px]">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
+                  <span>Copy All</span>
+                </button>
+                <button @click="eventsPaused = !eventsPaused" :class="eventsPaused ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'" class="px-3 py-1 text-xs rounded-lg transition cursor-pointer min-h-[32px]">
+                  {{ eventsPaused ? 'Resume' : 'Pause' }}
+                </button>
+                <button @click="clearEvents" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer min-h-[32px]">
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <!-- Filter Input -->
+            <div class="flex items-center justify-between gap-2">
+              <input type="text" v-model="eventSessionFilter" placeholder="Filter events by session identifier..." class="w-full input-base px-3 py-1.5 rounded-lg text-xs font-mono placeholder:text-zinc-600">
+            </div>
+
+            <!-- Scrollable Events Feed -->
+            <div class="flex-1 bg-zinc-950/80 rounded-xl p-3 border border-zinc-900 overflow-y-auto max-h-[440px] space-y-2">
+              <div v-if="filteredEvents.length === 0" class="text-zinc-600 text-center py-12 text-xs">
+                Waiting for gateway event signals...
+              </div>
+
+              <div v-for="evt in filteredEvents" :key="evt.id" class="p-3 rounded-xl bg-zinc-950 border border-zinc-900/90 space-y-2">
+                <div class="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 uppercase">
+                      {{ evt.type || 'EVENT' }}
+                    </span>
+                    <span v-if="evt.sessionId" class="text-xs font-mono text-zinc-300 truncate">
+                      {{ evt.sessionId }}
+                    </span>
+                  </div>
+                  <span class="text-[10px] text-zinc-500 font-mono">{{ getRelativeTime(evt.timestamp) }}</span>
+                </div>
+
+                <div v-if="evt.summary || evt.message" class="text-xs text-zinc-300 font-sans">
+                  {{ evt.summary || evt.message }}
+                </div>
+
+                <!-- Declarative Expand / Collapse (Never Breaks on Re-render) -->
+                <div class="pt-1 flex items-center justify-between">
+                  <button @click="evt.expanded = !evt.expanded" class="text-xs text-slate-400 hover:text-slate-200 cursor-pointer flex items-center gap-1">
+                    <svg :class="{ 'rotate-90': evt.expanded }" class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    <span>{{ evt.expanded ? 'Hide Payload' : 'Show Payload' }}</span>
+                  </button>
+                  <button @click="copyToClipboard(evt.payload || evt)" class="text-[10px] text-zinc-400 hover:text-white px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 cursor-pointer">
+                    Copy Payload
+                  </button>
+                </div>
+
+                <pre v-if="evt.expanded" class="bg-slate-950 p-2.5 rounded-lg text-xs font-mono text-emerald-400 overflow-x-auto border border-zinc-900 max-h-48 overflow-y-auto">{{ evt.payload || evt }}</pre>
+              </div>
+            </div>
+
+            <div class="text-xs text-zinc-500 font-mono text-right">
+              {{ filteredEvents.length }} events logged
+            </div>
           </div>
 
-          <div id="filename-container" class="hidden">
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Custom Filename</label>
-            <input type="text" id="media-filename" placeholder="monthly-statement.pdf" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono">
-          </div>
+        </div>
+      </section>
 
-          <div id="ptt-container" class="hidden flex items-center gap-2 p-3 rounded-xl bg-zinc-900 border border-zinc-800">
-            <input type="checkbox" id="media-ptt" class="rounded bg-zinc-800 border-zinc-700 text-emerald-500 focus:ring-0">
-            <label for="media-ptt" class="text-xs text-zinc-300 select-none">Send as Push-To-Talk (Voice Note with waveform)</label>
-          </div>
-
-          <button type="submit" id="btn-send-media" class="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 cursor-pointer min-h-[44px]">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-            <span>Dispatch Media Attachment</span>
-          </button>
-          <div id="send-media-status" class="text-xs text-center min-h-[16px]"></div>
-        </form>
-      </div>
-    </section>
+    </main>
 
     <!-- ========================================================================= -->
-    <!-- TAB 3: LIVE LOGS & DEEP TELEMETRY DIAGNOSTICS                            -->
+    <!-- MOBILE FIXED BOTTOM NAVIGATION (< 768px ONLY)                            -->
     <!-- ========================================================================= -->
-    <section id="section-stream" class="hidden space-y-6 max-w-6xl mx-auto">
-      <div class="card-surface rounded-2xl p-4 sm:p-6 space-y-4 shadow-sm flex flex-col h-full min-h-[620px]">
-        
-        <!-- Stream Sub-Navigation Tabs -->
-        <div class="flex items-center justify-between pb-3 border-b border-zinc-800 flex-wrap gap-2">
-          <div class="flex p-1 bg-zinc-900/90 rounded-xl border border-zinc-800 text-xs font-semibold">
-            <button id="stream-tab-btn-logs" onclick="window.switchStreamTab('logs')" class="px-3.5 py-1.5 rounded-lg bg-zinc-800 text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
-              <span id="sse-status-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Pino Logs</span>
-            </button>
-            <button id="stream-tab-btn-events" onclick="window.switchStreamTab('events')" class="px-3.5 py-1.5 rounded-lg text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
-              <span>Gateway Events</span>
-            </button>
-            <button id="stream-tab-btn-files" onclick="window.switchStreamTab('files')" class="px-3.5 py-1.5 rounded-lg text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
-              <span>Disk Logs Explorer</span>
-            </button>
-          </div>
-          <div id="sse-connection-label" class="text-emerald-400 text-xs font-mono flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> SSE Active Stream
-          </div>
-        </div>
-
-        <!-- Subview 1: Pino Structured Logs (SSE) -->
-        <div id="subview-pino-logs" class="flex-1 flex flex-col space-y-3">
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-1 bg-zinc-900/90 p-1 rounded-lg border border-zinc-800 text-[11px]">
-              <button onclick="window.setLogLevelFilter('all')" data-level="all" class="log-level-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 text-white font-medium cursor-pointer">All</button>
-              <button onclick="window.setLogLevelFilter('info')" data-level="info" class="log-level-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Info</button>
-              <button onclick="window.setLogLevelFilter('warn')" data-level="warn" class="log-level-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Warn</button>
-              <button onclick="window.setLogLevelFilter('error')" data-level="error" class="log-level-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Error</button>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-              <button onclick="window.copyAllLogs('text')" class="px-3 py-1 text-xs rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 transition cursor-pointer flex items-center gap-1.5 min-h-[32px]" title="Copy visible logs as formatted text lines">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
-                <span>Copy Logs</span>
-              </button>
-              <button onclick="window.copyAllLogs('json')" class="px-3 py-1 text-xs rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition cursor-pointer flex items-center gap-1.5 min-h-[32px]" title="Copy visible logs as JSON array">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
-                <span>Copy JSON</span>
-              </button>
-              <button id="btn-log-stream-pause" onclick="window.toggleLogStreamPause()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer min-h-[32px]">Pause</button>
-              <button onclick="window.clearLogFeed()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer min-h-[32px]">Clear</button>
-            </div>
-          </div>
-
-          <div class="flex items-center justify-between gap-2">
-            <input type="text" id="log-filter-session" oninput="window.filterLogsChanged()" placeholder="Filter by Session ID..." class="w-full input-base px-3 py-1.5 rounded-lg text-xs font-mono placeholder:text-zinc-600">
-            <label class="flex items-center gap-1.5 text-xs text-zinc-400 select-none whitespace-nowrap cursor-pointer">
-              <input type="checkbox" id="log-autoscroll" checked class="rounded bg-zinc-800 border-zinc-700 text-emerald-500 focus:ring-0">
-              <span>Auto-scroll</span>
-            </label>
-          </div>
-
-          <div id="logs-feed" class="flex-1 bg-zinc-950/80 rounded-xl p-3 border border-zinc-900 overflow-y-auto max-h-[440px] space-y-2 font-mono">
-            <div class="text-zinc-600 text-center py-12 text-xs font-sans">Connecting to live log stream...</div>
-          </div>
-          <div id="log-counter" class="text-xs text-zinc-500 font-mono text-right">0 logs captured</div>
-        </div>
-
-        <!-- Subview 2: Gateway Events Feed -->
-        <div id="subview-gateway-events" class="hidden flex-1 flex flex-col space-y-3">
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-1 bg-zinc-900/90 p-1 rounded-lg border border-zinc-800 text-xs overflow-x-auto scrollbar-none">
-              <button onclick="window.setEventFilter('all')" data-filter="all" class="event-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 text-white font-medium cursor-pointer">All</button>
-              <button onclick="window.setEventFilter('inbound_message')" data-filter="inbound_message" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Inbound</button>
-              <button onclick="window.setEventFilter('outbound_message')" data-filter="outbound_message" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Outbound</button>
-              <button onclick="window.setEventFilter('message_ack')" data-filter="message_ack" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">ACKs</button>
-            </div>
-            <div class="flex items-center gap-2">
-              <button id="btn-stream-pause" onclick="window.toggleStreamPause()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer">Pause</button>
-              <button onclick="window.clearEventFeed()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer">Clear</button>
-            </div>
-          </div>
-
-          <div id="events-feed" class="flex-1 bg-zinc-950/80 rounded-xl p-3 border border-zinc-900 overflow-y-auto max-h-[440px] space-y-2">
-            <div class="text-zinc-600 text-center py-12 text-xs">Waiting for gateway event signals...</div>
-          </div>
-          <div id="stream-counter" class="text-xs text-zinc-500 font-mono text-right">0 events logged</div>
-        </div>
-
-        <!-- Subview 3: Disk Logs & Rotation Explorer -->
-        <div id="subview-log-files" class="hidden flex-1 flex flex-col space-y-3">
-          <div class="flex items-center justify-between">
-            <div class="text-xs text-zinc-400">
-              <span>Total Disk Usage: </span>
-              <span id="log-total-disk-usage" class="font-bold text-white font-mono">0 B</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <button onclick="window.triggerLogCleanup()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition cursor-pointer flex items-center gap-1.5" title="Purge files older than 14 days">
-                <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                <span>Retention Clean</span>
-              </button>
-              <button onclick="window.confirmClearAllLogs()" class="px-3 py-1 text-xs rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition cursor-pointer flex items-center gap-1.5" title="Truncate all log files to 0 B">
-                <span>Clear All</span>
-              </button>
-            </div>
-          </div>
-
-          <div id="log-files-list" class="flex-1 bg-zinc-950/80 rounded-xl p-3 border border-zinc-900 overflow-y-auto max-h-[440px] space-y-2 text-xs">
-            <div class="text-zinc-500 text-center py-8">Loading log files...</div>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-  </main>
-
-  <!-- ========================================================================= -->
-  <!-- MOBILE BOTTOM NAVIGATION (< 768px ONLY)                                  -->
-  <!-- ========================================================================= -->
-  <nav class="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-6 py-2 pb-safe flex items-center justify-around text-xs shadow-2xl">
-    <button id="bottom-nav-sessions" onclick="window.switchTab('sessions')" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-emerald-400 transition cursor-pointer">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-      <span class="text-[10px] font-medium">Sessions</span>
-    </button>
-    <button id="bottom-nav-sender" onclick="window.switchTab('sender')" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-      <span class="text-[10px] font-medium">Console</span>
-    </button>
-    <button id="bottom-nav-stream" onclick="window.switchTab('stream')" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer relative">
-      <span class="absolute top-1 right-3 w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-      <span class="text-[10px] font-medium">Live Logs</span>
-    </button>
-  </nav>
-
-  <!-- ========================================================================= -->
-  <!-- MODALS & OVERLAYS                                                         -->
-  <!-- ========================================================================= -->
-
-  <!-- QR Code & Phone Pairing Code Modal -->
-  <div id="qr-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
-    <div class="card-surface rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl relative">
-      <button onclick="window.closeQrModal()" class="absolute top-4 right-4 text-zinc-400 hover:text-white p-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 cursor-pointer">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+    <nav class="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-6 py-2 pb-safe flex items-center justify-around text-xs shadow-2xl">
+      <button @click="activeTab = 'sessions'" :class="activeTab === 'sessions' ? 'text-emerald-400' : 'text-zinc-400 hover:text-zinc-200'" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg transition cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+        <span class="text-[10px] font-medium">Sessions</span>
       </button>
+      <button @click="activeTab = 'console'" :class="activeTab === 'console' ? 'text-indigo-400' : 'text-zinc-400 hover:text-zinc-200'" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg transition cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+        <span class="text-[10px] font-medium">Console</span>
+      </button>
+      <button @click="activeTab = 'live-logs'" :class="activeTab === 'live-logs' ? 'text-cyan-400' : 'text-zinc-400 hover:text-zinc-200'" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg transition cursor-pointer relative">
+        <span class="absolute top-1 right-3 w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+        <span class="text-[10px] font-medium">Live Logs</span>
+      </button>
+    </nav>
 
-      <div>
-        <h3 class="font-bold text-white text-base">WhatsApp Pairing</h3>
-        <p id="qr-session-label" class="text-xs text-zinc-400 font-mono mt-0.5">Session: tenant-botla-1</p>
-      </div>
+    <!-- ========================================================================= -->
+    <!-- MODALS & OVERLAYS                                                         -->
+    <!-- ========================================================================= -->
 
-      <!-- Segmented Tab Picker (QR vs Phone Code) -->
-      <div class="grid grid-cols-2 gap-1 p-1 bg-zinc-900 rounded-xl text-xs font-semibold">
-        <button id="pairing-tab-qr" onclick="window.switchPairingTab('qr')" class="py-2 px-3 rounded-lg bg-zinc-800 text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
-          <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
-          <span>QR Scanner</span>
+    <!-- 1. WhatsApp Pairing Code & QR Modal -->
+    <div v-if="pairingModal.isOpen" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+      <div class="card-surface rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl relative">
+        <button @click="closePairingModal" class="absolute top-4 right-4 text-zinc-400 hover:text-white p-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 cursor-pointer min-h-[32px] min-w-[32px] flex items-center justify-center">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
         </button>
-        <button id="pairing-tab-code" onclick="window.switchPairingTab('code')" class="py-2 px-3 rounded-lg text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
-          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-          <span>Phone Code</span>
-        </button>
-      </div>
 
-      <!-- Tab View 1: QR Code -->
-      <div id="pairing-view-qr" class="space-y-4">
-        <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex flex-col items-center justify-center min-h-[260px] relative">
-          <img id="qr-image" class="w-56 h-56 rounded-lg bg-white p-2 shadow-inner hidden" alt="WhatsApp QR Code">
-          <div id="qr-placeholder" class="flex flex-col items-center justify-center text-center p-4 gap-2">
-            <svg class="w-8 h-8 text-indigo-400 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-            <span class="text-zinc-400 text-xs">Awaiting socket QR event...</span>
+        <div>
+          <h3 class="font-bold text-white text-base">WhatsApp Device Pairing</h3>
+          <p class="text-xs text-zinc-400 font-mono mt-0.5">Session: {{ pairingModal.sessionId }}</p>
+        </div>
+
+        <!-- Mode Segmented Picker -->
+        <div class="grid grid-cols-2 gap-1 p-1 bg-zinc-900 rounded-xl text-xs font-semibold">
+          <button @click="pairingModal.mode = 'phone'" :class="pairingModal.mode === 'phone' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'" class="py-2 px-3 rounded-lg transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
+            <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+            <span>Phone Code</span>
+          </button>
+          <button @click="pairingModal.mode = 'qr'" :class="pairingModal.mode === 'qr' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'" class="py-2 px-3 rounded-lg transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
+            <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+            <span>QR Scanner</span>
+          </button>
+        </div>
+
+        <!-- Phone Pairing Code View -->
+        <div v-if="pairingModal.mode === 'phone'" class="space-y-4">
+          <div class="space-y-3 bg-zinc-950 p-4 rounded-xl border border-zinc-800">
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Session Identifier</label>
+              <input type="text" :value="pairingModal.sessionId" class="w-full input-base px-3 py-2 rounded-xl text-xs font-mono" readonly>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Phone Number (With Country Code, e.g. 6281234567890)</label>
+              <div class="flex gap-2">
+                <input type="tel" v-model="pairingModal.phoneNumber" placeholder="e.g. 6281234567890" class="w-full input-base px-3 py-2 rounded-xl text-xs font-mono">
+                <button type="button" @click="requestPairingCode" :disabled="pairingModal.isFetchingCode" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs whitespace-nowrap cursor-pointer transition active:scale-95 shadow-md shadow-emerald-950/30 flex items-center justify-center min-h-[40px]">
+                  <span v-if="!pairingModal.isFetchingCode">Get Code</span>
+                  <span v-else>Loading...</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pairing Code Result Box -->
+          <div v-if="pairingModal.pairingCode" class="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-center space-y-2">
+            <div class="text-xs text-zinc-400">Your 8-Character Pairing Code:</div>
+            <div class="font-mono text-3xl font-bold tracking-widest text-emerald-400 py-1 select-all">
+              {{ pairingModal.pairingCode }}
+            </div>
+            <button @click="copyToClipboard(pairingModal.pairingCode, pairingModal)" class="text-xs text-zinc-400 hover:text-white px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition inline-flex items-center gap-1 cursor-pointer">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
+              <span>{{ pairingModal.copied ? 'Copied!' : 'Copy Code' }}</span>
+            </button>
+          </div>
+
+          <div v-if="pairingModal.statusText" class="text-xs text-zinc-400 text-center min-h-[16px]">
+            {{ pairingModal.statusText }}
           </div>
         </div>
-        <div class="flex items-center justify-between text-xs">
-          <span class="text-zinc-400">Socket Status:</span>
-          <span id="qr-status-badge" class="px-2 py-0.5 rounded-full text-[11px] font-medium badge-connecting">Connecting</span>
-        </div>
-      </div>
 
-      <!-- Tab View 2: Phone Pairing Code -->
-      <div id="pairing-view-code" class="space-y-4 hidden">
-        <div class="space-y-3 bg-zinc-950 p-4 rounded-xl border border-zinc-800">
-          <div>
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID</label>
-            <input type="text" id="pair-code-session" class="w-full input-base px-3 py-2 rounded-xl text-xs font-mono" readonly>
+        <!-- QR Scanner View -->
+        <div v-if="pairingModal.mode === 'qr'" class="space-y-4">
+          <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex flex-col items-center justify-center min-h-[260px] relative">
+            <img v-if="pairingModal.qrImage" :src="pairingModal.qrImage" class="w-56 h-56 rounded-lg bg-white p-2 shadow-inner" alt="WhatsApp QR Code">
+            <div v-else class="flex flex-col items-center justify-center text-center p-4 gap-2">
+              <svg class="w-8 h-8 text-indigo-400 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+              <span class="text-zinc-400 text-xs">Awaiting socket QR event...</span>
+            </div>
           </div>
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-zinc-400">Socket Status:</span>
+            <span :class="{
+              'badge-online': pairingModal.qrStatus === 'connected',
+              'badge-qr': pairingModal.qrStatus === 'qr_ready',
+              'badge-connecting': pairingModal.qrStatus !== 'connected' && pairingModal.qrStatus !== 'qr_ready'
+            }" class="px-2 py-0.5 rounded-full text-[11px] font-medium font-mono">
+              {{ pairingModal.qrStatus }}
+            </span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 2. Webhook Settings & Test Ping Modal -->
+    <div v-if="webhookModal.isOpen" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+      <div class="card-surface rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <button @click="closeWebhookSettingsModal" class="absolute top-4 right-4 text-zinc-400 hover:text-white p-1 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 cursor-pointer min-h-[32px] min-w-[32px] flex items-center justify-center">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+
+        <div>
+          <h3 class="font-bold text-white text-base flex items-center gap-2">
+            <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+            <span>Webhook Relay & Retry Settings</span>
+          </h3>
+          <p class="text-xs text-zinc-400 mt-0.5">Configure global target URL, HMAC signature secret, and event filters</p>
+        </div>
+
+        <form @submit.prevent="saveWebhookSettings" class="space-y-4">
+          
+          <div class="flex items-center justify-between p-3 rounded-xl bg-zinc-950 border border-zinc-800">
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="wh-enabled" v-model="webhookModal.enabled" class="rounded bg-zinc-900 border-zinc-700 text-emerald-500 focus:ring-0 w-4 h-4 cursor-pointer">
+              <label for="wh-enabled" class="text-xs font-semibold text-white select-none cursor-pointer">Enable Webhook Relay</label>
+            </div>
+            <span class="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">Source: {{ webhookModal.source }}</span>
+          </div>
+
           <div>
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Phone Number (With Country Code)</label>
-            <div class="flex gap-2">
-              <input type="tel" id="pair-code-phone" placeholder="e.g. 6281234567890" class="w-full input-base px-3 py-2 rounded-xl text-xs font-mono">
-              <button type="button" id="btn-pair-code" onclick="window.requestPairingCode()" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs whitespace-nowrap cursor-pointer transition active:scale-95 shadow-md shadow-emerald-950/30">
-                <span>Get Code</span>
+            <label class="block text-xs font-medium text-zinc-400 mb-1">Webhook Target URL</label>
+            <input type="url" v-model="webhookModal.url" placeholder="https://your-laravel-core.test/api/whatsapp/webhook" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" required>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-zinc-400 mb-1">HMAC-SHA256 Secret Key</label>
+            <div class="relative">
+              <input :type="webhookModal.showSecret ? 'text' : 'password'" v-model="webhookModal.secret" placeholder="Enter secret signature key" class="w-full input-base px-3.5 py-2.5 pr-10 rounded-xl text-xs font-mono">
+              <button type="button" @click="webhookModal.showSecret = !webhookModal.showSecret" class="absolute right-3 top-2.5 text-zinc-400 hover:text-white cursor-pointer">
+                <svg v-if="!webhookModal.showSecret" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"/></svg>
               </button>
             </div>
           </div>
-        </div>
 
-        <div id="pair-code-result-box" class="p-4 rounded-xl bg-zinc-950 border border-zinc-800 text-center space-y-2 hidden">
-          <div class="text-xs text-zinc-400">Your 8-Character Pairing Code:</div>
-          <div id="pair-code-display" class="font-mono text-2xl font-bold tracking-widest text-emerald-400 py-1 select-all">----</div>
-          <button onclick="window.copyPairCode()" class="text-xs text-zinc-400 hover:text-white px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition inline-flex items-center gap-1 cursor-pointer">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
-            <span>Copy Code</span>
-          </button>
-        </div>
-        <div id="pair-code-status" class="text-xs text-zinc-400 text-center min-h-[16px]"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Session Logout Confirmation Modal -->
-  <div id="logout-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
-    <div class="card-surface rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl relative">
-      <div class="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
-      </div>
-      <div class="text-center space-y-1">
-        <h3 class="font-bold text-white text-base">Logout & Unlink?</h3>
-        <p class="text-xs text-zinc-400">This will unlink the device from WhatsApp without wiping your local tenant configurations for session:</p>
-        <p id="logout-target-session-id" class="text-xs font-mono font-bold text-amber-400 py-1"></p>
-      </div>
-      <div class="grid grid-cols-2 gap-2 pt-2">
-        <button onclick="window.closeLogoutModal()" class="py-2.5 px-3 rounded-xl card-surface hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition cursor-pointer min-h-[44px]">Cancel</button>
-        <button id="btn-confirm-logout" onclick="window.executeLogoutSession()" class="py-2.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-amber-950/40 min-h-[44px]">
-          <span id="btn-confirm-logout-text">Logout Device</span>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Session Purge Confirmation Modal -->
-  <div id="purge-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
-    <div class="card-surface rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl relative">
-      <div class="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-      </div>
-      <div class="text-center space-y-1">
-        <h3 class="font-bold text-white text-base">Purge Session?</h3>
-        <p class="text-xs text-zinc-400">This will close the Baileys socket and purge all credentials from Redis for session:</p>
-        <p id="purge-target-session-id" class="text-xs font-mono font-bold text-rose-400 py-1"></p>
-      </div>
-      <div class="grid grid-cols-2 gap-2 pt-2">
-        <button onclick="window.closePurgeModal()" class="py-2.5 px-3 rounded-xl card-surface hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition cursor-pointer">Cancel</button>
-        <button id="btn-confirm-purge" onclick="window.executePurgeSession()" class="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/40">
-          <span id="btn-confirm-purge-text">Purge Session</span>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Log Clear Confirmation Modal -->
-  <div id="clear-log-modal" class="fixed inset-0 z-[70] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
-    <div class="card-surface rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl relative border border-zinc-800">
-      <div class="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-      </div>
-      <div class="text-center space-y-1">
-        <h3 id="clear-log-modal-title" class="font-bold text-white text-base">Clear Log File?</h3>
-        <p id="clear-log-modal-desc" class="text-xs text-zinc-400">This will safely truncate the log file to 0 bytes without disrupting running gateway services:</p>
-        <p id="clear-log-target-name" class="text-xs font-mono font-bold text-rose-400 py-1 break-all"></p>
-      </div>
-      <div class="grid grid-cols-2 gap-2 pt-2">
-        <button id="btn-cancel-clear-log" onclick="window.closeClearLogModal()" class="py-2.5 px-3 rounded-xl card-surface hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition cursor-pointer">Cancel</button>
-        <button id="btn-confirm-clear-log" onclick="window.executeConfirmedLogClear()" class="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/40">
-          <span id="btn-confirm-clear-log-text">Clear File</span>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Interactive Disk Log Viewer Modal -->
-  <div id="log-viewer-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 hidden">
-    <div class="card-surface rounded-2xl w-full max-w-5xl h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-zinc-800">
-      
-      <!-- Modal Header -->
-      <div class="px-4 py-3 bg-zinc-950 border-b border-zinc-800 flex items-center justify-between gap-3">
-        <div class="min-w-0 flex items-center gap-2.5">
-          <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
-          <div class="min-w-0">
-            <h3 id="log-viewer-filename" class="font-mono font-bold text-white text-sm truncate">combined.log</h3>
-            <p id="log-viewer-meta-subtitle" class="text-[10px] text-zinc-400 font-mono truncate">storage/logs/combined.log</p>
-          </div>
-          <span id="log-viewer-size-badge" class="hidden sm:inline px-2 py-0.5 rounded text-[10px] bg-zinc-800 text-zinc-300 font-mono">0 B</span>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <!-- Lines Selector -->
-          <div class="flex items-center gap-1 bg-zinc-900 p-1 rounded-lg border border-zinc-800 text-[11px] font-mono">
-            <span class="text-zinc-500 text-[10px] px-1 hidden md:inline">Lines:</span>
-            <button id="lines-pill-50" onclick="window.setLogViewerLines(50)" class="px-2 py-0.5 rounded text-zinc-400 hover:text-white transition cursor-pointer">50</button>
-            <button id="lines-pill-200" onclick="window.setLogViewerLines(200)" class="px-2 py-0.5 rounded bg-zinc-800 text-white font-semibold transition cursor-pointer">200</button>
-            <button id="lines-pill-500" onclick="window.setLogViewerLines(500)" class="px-2 py-0.5 rounded text-zinc-400 hover:text-white transition cursor-pointer">500</button>
+          <div>
+            <label class="block text-xs font-medium text-zinc-400 mb-1">Bearer Token (Optional)</label>
+            <input type="text" v-model="webhookModal.token" placeholder="e.g. Bearer token for authentication" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono">
           </div>
 
-          <button id="btn-log-viewer-refresh" onclick="window.refreshLogViewerContent()" class="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white transition cursor-pointer" title="Refresh log content">
-            <svg id="log-viewer-refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-          </button>
+          <!-- Event Dispatches Toggles -->
+          <div class="space-y-2 pt-1">
+            <label class="block text-xs font-medium text-zinc-400">Enabled Event Dispatches</label>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <label class="flex items-center gap-2 p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 cursor-pointer select-none">
+                <input type="checkbox" v-model="webhookModal.events.inbound" class="rounded bg-zinc-900 border-zinc-700 text-emerald-500 focus:ring-0">
+                <span>Inbound Msgs</span>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 cursor-pointer select-none">
+                <input type="checkbox" v-model="webhookModal.events.ack" class="rounded bg-zinc-900 border-zinc-700 text-emerald-500 focus:ring-0">
+                <span>Message ACKs</span>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 cursor-pointer select-none">
+                <input type="checkbox" v-model="webhookModal.events.status" class="rounded bg-zinc-900 border-zinc-700 text-emerald-500 focus:ring-0">
+                <span>Session Status</span>
+              </label>
+            </div>
+          </div>
 
-          <button id="btn-log-viewer-copy" onclick="window.copyLogViewerContent()" class="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white transition cursor-pointer" title="Copy content to clipboard">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
-          </button>
+          <!-- Test Ping Result Badge -->
+          <div v-if="webhookModal.pingStatus" class="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-zinc-400">Test Ping Status:</span>
+              <span :class="webhookModal.pingStatus.success ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'" class="px-2 py-0.5 rounded font-mono font-bold text-[11px]">
+                {{ webhookModal.pingStatus.statusCode || (webhookModal.pingStatus.success ? 200 : 500) }} {{ webhookModal.pingStatus.success ? 'OK' : 'Failed' }}
+              </span>
+            </div>
+            <div class="text-[11px] text-zinc-500 font-mono flex items-center justify-between">
+              <span>Latency: <strong class="text-zinc-300">{{ webhookModal.pingStatus.latencyMs }}ms</strong></span>
+              <span v-if="webhookModal.pingStatus.error" class="text-rose-400 truncate max-w-[200px]">{{ webhookModal.pingStatus.error }}</span>
+            </div>
+          </div>
 
-          <button id="btn-log-viewer-download" onclick="window.downloadCurrentLogViewerFile()" class="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white transition cursor-pointer" title="Download raw file">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-          </button>
-
-          <button id="btn-log-viewer-clear" onclick="window.confirmClearCurrentLogFile()" class="p-2 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 transition cursor-pointer" title="Clear/Truncate this file">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-          </button>
-
-          <button id="btn-log-viewer-close" onclick="window.closeLogViewer()" class="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition cursor-pointer">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-          </button>
-        </div>
+          <div class="grid grid-cols-2 gap-2 pt-3">
+            <button type="button" @click="testWebhookPing" :disabled="webhookModal.isPinging" class="py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-xs transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]">
+              <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+              <span>{{ webhookModal.isPinging ? 'Testing...' : 'Test Ping' }}</span>
+            </button>
+            <button type="submit" :disabled="webhookModal.isSaving" class="py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition active:scale-95 flex items-center justify-center gap-1.5 shadow-lg shadow-indigo-950/45 cursor-pointer min-h-[44px]">
+              <span>{{ webhookModal.isSaving ? 'Saving...' : 'Save Settings' }}</span>
+            </button>
+          </div>
+        </form>
       </div>
-
-      <!-- Terminal Content Area -->
-      <div id="log-viewer-content" class="flex-1 bg-black/95 p-3 sm:p-4 overflow-auto font-mono text-xs select-text">
-        <div class="text-zinc-500 text-center py-12 font-sans">Reading log file content...</div>
-      </div>
-
-      <!-- Footer Bar -->
-      <div class="px-4 py-2 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between text-[11px] text-zinc-400 font-mono">
-        <div id="log-viewer-footer-stats">Showing last 200 lines</div>
-        <div class="flex items-center gap-2">
-          <button onclick="window.scrollLogViewerToTop()" class="hover:text-white transition cursor-pointer">Top ↑</button>
-          <span>·</span>
-          <button onclick="window.scrollLogViewerToBottom()" class="hover:text-white transition cursor-pointer">Bottom ↓</button>
-        </div>
-      </div>
-
     </div>
+
+    <!-- 3. Session Logout Confirmation Modal -->
+    <div v-if="logoutModal.isOpen" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+      <div class="card-surface rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl relative">
+        <div class="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+        </div>
+        <div class="text-center space-y-1">
+          <h3 class="font-bold text-white text-base">Logout & Unlink?</h3>
+          <p class="text-xs text-zinc-400">This will unlink the device from WhatsApp without wiping your local tenant configurations for session:</p>
+          <p class="text-xs font-mono font-bold text-amber-400 py-1">{{ logoutModal.sessionId }}</p>
+        </div>
+        <div class="grid grid-cols-2 gap-2 pt-2">
+          <button @click="closeLogoutModal" class="py-2.5 px-3 rounded-xl card-surface hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition cursor-pointer min-h-[44px]">Cancel</button>
+          <button @click="executeLogoutSession" :disabled="logoutModal.isLoggingOut" class="py-2.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-amber-950/40 min-h-[44px]">
+            <span>{{ logoutModal.isLoggingOut ? 'Logging out...' : 'Logout Device' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Session Purge Confirmation Modal -->
+    <div v-if="purgeModal.isOpen" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+      <div class="card-surface rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl relative">
+        <div class="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+        </div>
+        <div class="text-center space-y-1">
+          <h3 class="font-bold text-white text-base">Purge Session?</h3>
+          <p class="text-xs text-zinc-400">This will close the Baileys socket and purge all credentials from Redis for session:</p>
+          <p class="text-xs font-mono font-bold text-rose-400 py-1">{{ purgeModal.sessionId }}</p>
+        </div>
+        <div class="grid grid-cols-2 gap-2 pt-2">
+          <button @click="closePurgeModal" class="py-2.5 px-3 rounded-xl card-surface hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition cursor-pointer min-h-[44px]">Cancel</button>
+          <button @click="executePurgeSession" :disabled="purgeModal.isPurging" class="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/40 min-h-[44px]">
+            <span>{{ purgeModal.isPurging ? 'Purging...' : 'Purge Session' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification Portal -->
+    <div class="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+      <div v-for="toast in toasts" :key="toast.id" :class="{
+        'border-emerald-500/40 bg-zinc-950/95 text-emerald-300': toast.type === 'success',
+        'border-rose-500/40 bg-zinc-950/95 text-rose-300': toast.type === 'error',
+        'border-amber-500/40 bg-zinc-950/95 text-amber-300': toast.type === 'warn',
+        'border-zinc-700 bg-zinc-950/95 text-zinc-200': toast.type === 'info'
+      }" class="p-3 rounded-xl border shadow-xl text-xs flex items-center gap-2 pointer-events-auto transition-all animate-bounce-short">
+        <span class="flex-1">{{ toast.message }}</span>
+      </div>
+    </div>
+
   </div>
-
-  <!-- Toast Notification Portal -->
-  <div id="toast-container" class="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
-
-  <!-- Module Entrypoint -->
-  <script type="module" src="/js/app.js"></script>
 </body>
 </html>

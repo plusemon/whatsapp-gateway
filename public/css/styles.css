@@ -10,6 +10,10 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+[v-cloak] {
+  display: none !important;
+}
+
 .card-surface {
   background-color: #121216;
   border: 1px solid #27272a;
@@ -93,6 +97,11 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
+}
+
+/* Cloak uncompiled Vue templates */
+[v-cloak] {
+  display: none !important;
 }
 
 /* Hide scrollbar utility */
