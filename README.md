@@ -5,7 +5,7 @@
   &nbsp;&nbsp;
   <img src="https://raw.githubusercontent.com/tandpfun/skill-icons/main/icons/NodeJS-Dark.svg" width="45" height="45" alt="Node.js" />
   &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/fastify/graphics/master/fastify-logo-black.svg" width="55" height="45" alt="Fastify" />
+  <img src="https://raw.githubusercontent.com/devicons/devicon/master/icons/fastify/fastify-plain.svg" width="45" height="45" alt="Fastify" />
   &nbsp;&nbsp;
   <img src="https://raw.githubusercontent.com/tandpfun/skill-icons/main/icons/Redis-Dark.svg" width="45" height="45" alt="Redis" />
   &nbsp;&nbsp;
