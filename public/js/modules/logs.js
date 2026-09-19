@@ -3,6 +3,13 @@
  * Handles Pino SSE live stream, Gateway event buffer, and Interactive Terminal Log Viewer.
  */
 import { SystemApi } from '../api.js';
+import {
+  formatLogTimestamp,
+  formatLogViewerLine,
+  getLogLevelBadgeInfo,
+  parsePinoJsonLine,
+  stripAnsi,
+} from '../components/logViewerModal.js';
 import { escapeHtml, formatBytes, getRelativeTime, showToast } from './ui.js';
 
 // State variables
@@ -206,7 +213,7 @@ export function renderLogs() {
           <span class="text-[10px] text-zinc-500 font-mono flex-shrink-0" title="${escapeHtml(clockTime)}">${escapeHtml(relTime)}</span>
         </div>
 
-        <div class="text-zinc-200 text-xs font-mono break-words leading-relaxed">${escapeHtml(log.message)}</div>
+        <div class="text-zinc-200 text-xs font-mono break-words leading-relaxed">${escapeHtml(stripAnsi(log.message))}</div>
 
         ${hasMeta ? `
           <details class="group">
@@ -268,33 +275,46 @@ export async function fetchLogFiles() {
   }
 
   listEl.innerHTML = data.files.map(file => {
-    let fileBadge = 'bg-zinc-800 text-zinc-300 border-zinc-700/80';
-    if (file.name === 'error.log') fileBadge = 'bg-rose-500/15 text-rose-400 border border-rose-500/30';
-    if (file.name === 'combined.log') fileBadge = 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30';
+    let fileBadge = 'bg-zinc-800/90 text-zinc-300 border-zinc-700/80';
+    let dotColor = 'bg-cyan-400';
+    if (file.name === 'error.log') {
+      fileBadge = 'bg-rose-500/15 text-rose-300 border border-rose-500/30';
+      dotColor = 'bg-rose-400';
+    } else if (file.name === 'combined.log') {
+      fileBadge = 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30';
+      dotColor = 'bg-cyan-400';
+    }
 
     return `
-      <div onclick="window.openLogViewer('${escapeHtml(file.name)}', '${escapeHtml(file.sizeFormatted)}')" class="p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900/80 transition-all cursor-pointer active:scale-[0.99] flex items-center justify-between gap-3 group">
-        <div class="min-w-0 flex items-center gap-2">
-          <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 group-hover:scale-125 transition-transform"></span>
-          <span class="font-bold text-zinc-200 truncate ${fileBadge} px-2 py-0.5 rounded text-[11px] font-mono">${escapeHtml(file.name)}</span>
-          <span class="text-[10px] text-zinc-500">(${escapeHtml(file.ageDays)}d old)</span>
+      <div onclick="window.openLogViewer('${escapeHtml(file.name)}', '${escapeHtml(file.sizeFormatted)}')" class="p-3 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900/80 transition-all cursor-pointer active:scale-[0.99] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 group">
+        <!-- Left: Full Filename, Age, and Size Pill -->
+        <div class="flex items-center justify-between sm:justify-start gap-2.5 min-w-0 flex-1">
+          <div class="flex items-center gap-2 min-w-0 flex-1 sm:flex-initial">
+            <span class="w-2 h-2 rounded-full ${dotColor} group-hover:scale-125 transition-transform flex-shrink-0"></span>
+            <span class="font-bold text-zinc-100 ${fileBadge} px-2.5 py-1 rounded-lg text-xs font-mono select-all overflow-hidden text-ellipsis whitespace-nowrap max-w-[150px] min-[380px]:max-w-[220px] sm:max-w-none">${escapeHtml(file.name)}</span>
+            <span class="text-[10px] text-zinc-400 font-mono flex-shrink-0 hidden min-[420px]:inline">${escapeHtml(file.ageDays)}d old</span>
+          </div>
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <span class="px-2 py-0.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 font-mono text-[11px] font-semibold">${escapeHtml(file.sizeFormatted)}</span>
+            <span class="text-[10px] text-zinc-400 font-mono flex-shrink-0 min-[420px]:hidden">(${escapeHtml(file.ageDays)}d)</span>
+          </div>
         </div>
-        <div class="flex items-center gap-1.5 font-mono flex-shrink-0">
-          <span class="text-xs text-zinc-300 font-semibold mr-1">${escapeHtml(file.sizeFormatted)}</span>
-          
-          <button type="button" onclick="event.stopPropagation(); window.openLogViewer('${escapeHtml(file.name)}', '${escapeHtml(file.sizeFormatted)}')" class="px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-medium flex items-center gap-1 transition active:scale-95" title="View log content">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-            <span class="hidden sm:inline">View</span>
+
+        <!-- Right: Touch-friendly Action Buttons -->
+        <div class="flex items-center justify-end gap-1.5 flex-shrink-0 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-zinc-900/80 font-mono">
+          <button type="button" onclick="event.stopPropagation(); window.openLogViewer('${escapeHtml(file.name)}', '${escapeHtml(file.sizeFormatted)}')" class="h-8 px-2.5 sm:px-3 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-medium flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer min-w-[40px] sm:min-w-0" title="View log content">
+            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+            <span>View</span>
           </button>
 
-          <button type="button" onclick="event.stopPropagation(); window.confirmClearSingleLogFile('${escapeHtml(file.name)}')" class="px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[11px] font-medium flex items-center gap-1 transition active:scale-95 cursor-pointer" title="Clear/Truncate this log file">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-            <span class="hidden sm:inline">Clear</span>
+          <button type="button" onclick="event.stopPropagation(); window.confirmClearSingleLogFile('${escapeHtml(file.name)}')" class="h-8 px-2.5 sm:px-3 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-medium flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer min-w-[40px] sm:min-w-0" title="Clear/Truncate this log file">
+            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            <span>Clear</span>
           </button>
 
-          <button type="button" onclick="event.stopPropagation(); window.downloadLogFile('${escapeHtml(file.name)}')" class="px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 text-[11px] font-medium flex items-center gap-1 transition active:scale-95" title="Download raw log file">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-            <span class="hidden sm:inline">Download</span>
+          <button type="button" onclick="event.stopPropagation(); window.downloadLogFile('${escapeHtml(file.name)}')" class="h-8 px-2.5 sm:px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 text-xs font-medium flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer min-w-[40px] sm:min-w-0" title="Download raw log file">
+            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            <span>Download</span>
           </button>
         </div>
       </div>
@@ -427,27 +447,14 @@ export function renderLogViewerTerminal(content) {
     return;
   }
 
-  const rawLines = content.split('\n');
-  const formattedHtml = rawLines.map((line, idx) => {
-    const lineNum = idx + 1;
-    let lineClass = 'text-emerald-400';
-    const lower = line.toLowerCase();
-    
-    if (lower.includes('"level":50') || lower.includes('"level":"error"') || lower.includes('"level":"fatal"') || lower.includes('error:') || lower.includes('[error]')) {
-      lineClass = 'text-rose-400 font-medium';
-    } else if (lower.includes('"level":40') || lower.includes('"level":"warn"') || lower.includes('warn:') || lower.includes('[warn]')) {
-      lineClass = 'text-amber-300';
-    } else if (lower.includes('"level":30') || lower.includes('"level":"info"') || lower.includes('info:')) {
-      lineClass = 'text-emerald-300';
-    } else if (lower.includes('"level":20') || lower.includes('"level":"debug"') || lower.includes('debug:')) {
-      lineClass = 'text-zinc-400';
-    }
+  const rawLines = content.split(/\r?\n/);
+  // Remove trailing blank line if present
+  if (rawLines.length > 0 && rawLines[rawLines.length - 1] === '') {
+    rawLines.pop();
+  }
 
-    const safeText = escapeHtml(line);
-    return `<div class="table-row leading-relaxed hover:bg-zinc-900/70 transition-colors">
-      <span class="table-cell select-none text-zinc-600 pr-2.5 sm:pr-3 text-right text-[10px] w-8 sm:w-10 font-mono align-top">${lineNum}</span>
-      <span class="table-cell ${lineClass} break-all whitespace-pre-wrap font-mono align-top text-[11px] sm:text-xs">${safeText}</span>
-    </div>`;
+  const formattedHtml = rawLines.map((line, idx) => {
+    return formatLogViewerLine(line, idx + 1);
   }).join('');
 
   contentEl.innerHTML = `<div class="table w-full font-mono text-[11px] sm:text-xs">${formattedHtml}</div>`;
@@ -496,43 +503,112 @@ export function downloadCurrentLogViewerFile() {
   downloadLogFile(activeLogViewerFile);
 }
 
-export async function confirmClearCurrentLogFile() {
-  if (!activeLogViewerFile) return;
-  const confirmed = window.confirm(`Are you sure you want to clear/truncate "${activeLogViewerFile}"?\n\nAll current contents in this log file will be emptied (0 B) without breaking active logging.`);
-  if (!confirmed) return;
-  await executeClearLogFile(activeLogViewerFile);
+let pendingClearTarget = '';
+
+export function openClearLogModal(targetFile) {
+  pendingClearTarget = targetFile || 'all';
+  const modal = document.getElementById('clear-log-modal');
+  const titleEl = document.getElementById('clear-log-modal-title');
+  const descEl = document.getElementById('clear-log-modal-desc');
+  const targetNameEl = document.getElementById('clear-log-target-name');
+  const btnTextEl = document.getElementById('btn-confirm-clear-log-text');
+
+  if (targetFile === 'all') {
+    if (titleEl) titleEl.textContent = 'Clear All Log Files?';
+    if (descEl) descEl.textContent = 'This will safely truncate all log files in storage/logs/ to 0 bytes without stopping gateway services:';
+    if (targetNameEl) targetNameEl.textContent = 'All storage/logs/*.log files';
+    if (btnTextEl) btnTextEl.textContent = 'Clear All Logs';
+  } else {
+    if (titleEl) titleEl.textContent = 'Clear Log File?';
+    if (descEl) descEl.textContent = 'This will safely truncate this log file to 0 bytes without stopping gateway services:';
+    if (targetNameEl) targetNameEl.textContent = `storage/logs/${targetFile}`;
+    if (btnTextEl) btnTextEl.textContent = 'Clear File';
+  }
+
+  if (modal) modal.classList.remove('hidden');
 }
 
-export async function confirmClearSingleLogFile(filename) {
+export function closeClearLogModal() {
+  const modal = document.getElementById('clear-log-modal');
+  if (modal) modal.classList.add('hidden');
+  pendingClearTarget = '';
+}
+
+export async function executeConfirmedLogClear() {
+  const target = pendingClearTarget;
+  if (!target) return;
+
+  const btn = document.getElementById('btn-confirm-clear-log');
+  const btnText = document.getElementById('btn-confirm-clear-log-text');
+  if (btn) btn.disabled = true;
+  if (btnText) btnText.textContent = 'Clearing...';
+
+  try {
+    await executeClearLogFile(target);
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btnText) btnText.textContent = target === 'all' ? 'Clear All Logs' : 'Clear File';
+    closeClearLogModal();
+  }
+}
+
+export function confirmClearCurrentLogFile() {
+  if (!activeLogViewerFile) {
+    showToast('No log file currently opened', 'warn');
+    return;
+  }
+  openClearLogModal(activeLogViewerFile);
+}
+
+export function confirmClearSingleLogFile(filename) {
   if (!filename) return;
-  const confirmed = window.confirm(`Are you sure you want to clear/truncate "${filename}"?\n\nAll contents in this log file will be emptied (0 B).`);
-  if (!confirmed) return;
-  await executeClearLogFile(filename);
+  openClearLogModal(filename);
 }
 
-export async function confirmClearAllLogs() {
-  const confirmed = window.confirm('Are you sure you want to clear/truncate ALL log files in storage/logs/?\n\nAll active and rotated log files will be emptied to 0 B.');
-  if (!confirmed) return;
-  await executeClearLogFile('all');
+export function confirmClearAllLogs() {
+  openClearLogModal('all');
 }
 
 export async function executeClearLogFile(targetFile) {
-  showToast(`Truncating ${targetFile === 'all' ? 'all log files' : targetFile}...`);
+  if (!targetFile) return;
+  showToast(`Clearing ${targetFile === 'all' ? 'all log files' : targetFile}...`);
   try {
     const data = await SystemApi.clearLogFile(targetFile);
     if (data && data.success) {
-      const freedStr = data.data?.freedBytesFormatted || data.freedBytesFormatted || '';
-      showToast(`Logs cleared: ${targetFile === 'all' ? 'All files truncated' : targetFile} (${freedStr})`);
-      await fetchLogFiles();
+      const freedStr = data.freedBytesFormatted || data.data?.freedBytesFormatted || '';
+      showToast(`Log file cleared successfully${freedStr ? ' (' + freedStr + ' freed)' : ''}`);
+
+      // If the currently opened file in the viewer was cleared (or 'all' was cleared)
       if (activeLogViewerFile && (activeLogViewerFile === targetFile || targetFile === 'all')) {
-        await loadLogViewerContent();
+        rawLogViewerContent = '';
+        renderLogViewerTerminal('');
+
+        // Update DOM stats and badges immediately
+        const sizeBadgeEl = document.getElementById('log-viewer-size-badge');
+        const footerStatsEl = document.getElementById('log-viewer-footer-stats');
+        const countEl = document.getElementById('log-viewer-terminal-lines-count');
+        const subtitleEl = document.getElementById('log-viewer-meta-subtitle');
+
+        if (sizeBadgeEl) sizeBadgeEl.textContent = '0 B';
+        if (footerStatsEl) footerStatsEl.textContent = 'Showing 0 lines (0 B)';
+        if (countEl) countEl.textContent = '0';
+        if (subtitleEl) subtitleEl.textContent = `storage/logs/${activeLogViewerFile} · Modified Just now`;
       }
+
+      // If all logs were cleared, also clear live stream feed if requested
+      if (targetFile === 'all') {
+        cachedLogsList = [];
+        renderLogs();
+      }
+
+      // Trigger background refresh of the disk log file list
+      await fetchLogFiles();
     } else {
       const errMsg = data?.error?.message || data?.message || 'Failed to clear log file';
       showToast(`Failed to clear log: ${errMsg}`, 'error');
     }
   } catch (err) {
-    showToast('Request to clear logs failed: ' + err.message, 'error');
+    showToast('Request to clear logs failed: ' + (err.message || err), 'error');
   }
 }
 

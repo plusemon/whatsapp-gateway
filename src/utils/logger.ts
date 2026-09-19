@@ -202,6 +202,53 @@ export function getRecentLogs(limit = 100): StreamLogEvent[] {
 }
 
 /**
+ * Empties the in-memory circular log buffer.
+ */
+export function clearRecentLogs(): void {
+  recentLogs.length = 0;
+}
+
+/**
+ * Safely closes active log file streams so files can be cleanly truncated or rotated.
+ */
+export function resetLoggerStreams(targetFile?: string): void {
+  const norm = targetFile ? targetFile.toLowerCase().trim() : 'all';
+
+  if (norm === 'all' || norm === 'combined.log') {
+    if (combinedStream && !combinedStream.closed && !combinedStream.destroyed) {
+      try {
+        combinedStream.end();
+      } catch {
+        // Ignore stream closing error
+      }
+      combinedStream = null;
+    }
+  }
+
+  if (norm === 'all' || norm === 'error.log') {
+    if (errorStream && !errorStream.closed && !errorStream.destroyed) {
+      try {
+        errorStream.end();
+      } catch {
+        // Ignore stream closing error
+      }
+      errorStream = null;
+    }
+  }
+
+  if (norm === 'all' || norm.startsWith('gateway-')) {
+    if (dailyStream && !dailyStream.closed && !dailyStream.destroyed) {
+      try {
+        dailyStream.end();
+      } catch {
+        // Ignore stream closing error
+      }
+      dailyStream = null;
+    }
+  }
+}
+
+/**
  * Subscribes a listener function to real-time log events.
  * Returns an unsubscribe callback function.
  */

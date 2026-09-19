@@ -10,7 +10,7 @@ import { isUsingMockRedis } from '../config/redis.js';
 import { MediaService } from '../services/media.service.js';
 import { sessionService } from '../services/session.service.js';
 import { cleanLogStorage, formatBytes } from '../utils/cleanup.js';
-import { getRecentLogs, logger, subscribeLogStream } from '../utils/logger.js';
+import { clearRecentLogs, getRecentLogs, logger, resetLoggerStreams, subscribeLogStream } from '../utils/logger.js';
 import { ResponseUtil } from '../utils/response.util.js';
 import { getCachedWhatsAppVersion } from '../utils/versionGuard.js';
 import type { StreamLogEvent } from '../types/index.js';
@@ -390,14 +390,20 @@ export class SystemController {
     request: FastifyRequest<{
       Body: {
         file?: string;
+        target?: string;
+      };
+      Querystring: {
+        file?: string;
       };
     }>,
     reply: FastifyReply
   ): Promise<FastifyReply> {
     try {
-      const target = request.body?.file?.trim();
+      const rawTarget = request.body?.file || request.body?.target || request.query?.file;
+      const target = typeof rawTarget === 'string' ? rawTarget.trim() : '';
+
       if (!target) {
-        return ResponseUtil.error(reply, "Body parameter 'file' is required", 400, 'MISSING_PARAM_FILE');
+        return ResponseUtil.error(reply, "Parameter 'file' is required in body or query", 400, 'MISSING_PARAM_FILE');
       }
 
       const logsDir = path.resolve(process.cwd(), 'storage/logs');
@@ -409,6 +415,10 @@ export class SystemController {
       let totalFreedBytes = 0;
 
       if (target.toLowerCase() === 'all') {
+        // Safely detach all open Pino write streams before truncation
+        resetLoggerStreams('all');
+        clearRecentLogs();
+
         const entries = await fs.promises.readdir(logsDir, { withFileTypes: true });
         for (const entry of entries) {
           if (entry.isFile()) {
@@ -417,6 +427,11 @@ export class SystemController {
               const stat = await fs.promises.stat(filePath);
               totalFreedBytes += stat.size;
               // Truncate to 0 bytes preserving inode
+              try {
+                await fs.promises.truncate(filePath, 0);
+              } catch {
+                // Fallback to write empty string
+              }
               await fs.promises.writeFile(filePath, '', 'utf-8');
               clearedFiles.push(entry.name);
             } catch (fileErr: any) {
@@ -452,6 +467,9 @@ export class SystemController {
         return ResponseUtil.error(reply, 'Access denied: Path is outside storage/logs directory', 403, 'FORBIDDEN_PATH');
       }
 
+      // Reset logger stream for this specific file if active
+      resetLoggerStreams(filename);
+
       if (!fs.existsSync(filePath)) {
         // Create as empty if it doesn't exist
         await fs.promises.writeFile(filePath, '', 'utf-8');
@@ -475,7 +493,12 @@ export class SystemController {
       }
 
       totalFreedBytes = stat.size;
-      // Truncate file content to 0 bytes keeping active file handle intact
+      // Truncate file content to 0 bytes
+      try {
+        await fs.promises.truncate(filePath, 0);
+      } catch {
+        // Fallback
+      }
       await fs.promises.writeFile(filePath, '', 'utf-8');
       clearedFiles.push(filename);
 

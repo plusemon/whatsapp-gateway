@@ -32,9 +32,15 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       schema: {
         body: {
           type: 'object',
-          required: ['file'],
           properties: {
-            file: { type: 'string', minLength: 1 },
+            file: { type: 'string' },
+            target: { type: 'string' },
+          },
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            file: { type: 'string' },
           },
         },
       },

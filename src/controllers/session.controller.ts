@@ -226,13 +226,25 @@ export class SessionController {
     _request: FastifyRequest,
     reply: FastifyReply
   ): Promise<FastifyReply> {
-    return ResponseUtil.success(
-      reply,
-      {
-        events: sessionService.getRecentEvents(),
-      },
-      200
-    );
+    try {
+      const events = sessionService.getRecentEvents();
+      return ResponseUtil.success(
+        reply,
+        {
+          events: Array.isArray(events) ? events : [],
+        },
+        200
+      );
+    } catch (err: any) {
+      return ResponseUtil.error(
+        reply,
+        'Failed to fetch gateway events: ' + (err?.message || 'Unknown error'),
+        500,
+        'EVENTS_FETCH_FAILED',
+        null,
+        { events: [] }
+      );
+    }
   }
 
   /**

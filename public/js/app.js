@@ -38,8 +38,10 @@ import {
 
 // Import Console dispatcher
 import {
+  handleQuickSendMessage,
   handleSendMedia,
   handleSendMessage,
+  setQuickSendTemplate,
   setSendTemplate,
   switchSendTab,
   toggleMediaFields,
@@ -47,8 +49,15 @@ import {
 
 // Import Diagnostics & Logs
 import {
+  formatLogTimestamp,
+  formatLogViewerLine,
+  getLogLevelBadgeInfo,
+  parsePinoJsonLine,
+} from './components/logViewerModal.js';
+import {
   clearEventFeed,
   clearLogFeed,
+  closeClearLogModal,
   closeLogViewer,
   confirmClearAllLogs,
   confirmClearCurrentLogFile,
@@ -59,11 +68,13 @@ import {
   downloadCurrentLogViewerFile,
   downloadLogFile,
   executeClearLogFile,
+  executeConfirmedLogClear,
   fetchEvents,
   fetchLogFiles,
   filterLogsChanged,
   initLogStreamSSE,
   loadLogViewerContent,
+  openClearLogModal,
   openLogViewer,
   refreshLogViewerContent,
   renderEvents,
@@ -134,7 +145,9 @@ Object.assign(window, {
   switchSendTab,
   toggleMediaFields,
   setSendTemplate,
+  setQuickSendTemplate,
   handleSendMessage,
+  handleQuickSendMessage,
   handleSendMedia,
 
   // Logs & Diagnostics
@@ -162,6 +175,9 @@ Object.assign(window, {
   confirmClearCurrentLogFile,
   confirmClearSingleLogFile,
   confirmClearAllLogs,
+  openClearLogModal,
+  closeClearLogModal,
+  executeConfirmedLogClear,
   executeClearLogFile,
   triggerLogCleanup,
   triggerMediaCleanup,
@@ -171,6 +187,10 @@ Object.assign(window, {
   fetchEvents,
   renderEvents,
   copyEventPayload,
+  formatLogViewerLine,
+  parsePinoJsonLine,
+  formatLogTimestamp,
+  getLogLevelBadgeInfo,
 });
 
 /**
@@ -178,6 +198,11 @@ Object.assign(window, {
  */
 document.addEventListener('DOMContentLoaded', () => {
   // Bind form submissions
+  const quickSendForm = document.getElementById('quick-send-form');
+  if (quickSendForm) {
+    quickSendForm.addEventListener('submit', handleQuickSendMessage);
+  }
+
   const sendForm = document.getElementById('send-form');
   if (sendForm) {
     sendForm.addEventListener('submit', handleSendMessage);
@@ -186,6 +211,47 @@ document.addEventListener('DOMContentLoaded', () => {
   const sendMediaForm = document.getElementById('send-media-form');
   if (sendMediaForm) {
     sendMediaForm.addEventListener('submit', handleSendMedia);
+  }
+
+  // Bind modal buttons explicitly
+  const btnLogViewerClear = document.getElementById('btn-log-viewer-clear');
+  if (btnLogViewerClear) {
+    btnLogViewerClear.addEventListener('click', (e) => {
+      e.preventDefault();
+      confirmClearCurrentLogFile();
+    });
+  }
+
+  const btnLogViewerClose = document.getElementById('btn-log-viewer-close');
+  if (btnLogViewerClose) {
+    btnLogViewerClose.addEventListener('click', (e) => {
+      e.preventDefault();
+      closeLogViewer();
+    });
+  }
+
+  const btnLogViewerRefresh = document.getElementById('btn-log-viewer-refresh');
+  if (btnLogViewerRefresh) {
+    btnLogViewerRefresh.addEventListener('click', (e) => {
+      e.preventDefault();
+      refreshLogViewerContent();
+    });
+  }
+
+  const btnLogViewerCopy = document.getElementById('btn-log-viewer-copy');
+  if (btnLogViewerCopy) {
+    btnLogViewerCopy.addEventListener('click', (e) => {
+      e.preventDefault();
+      copyLogViewerContent();
+    });
+  }
+
+  const btnLogViewerDownload = document.getElementById('btn-log-viewer-download');
+  if (btnLogViewerDownload) {
+    btnLogViewerDownload.addEventListener('click', (e) => {
+      e.preventDefault();
+      downloadCurrentLogViewerFile();
+    });
   }
 
   // Bind modal backdrop clicks & keyboard shortcuts

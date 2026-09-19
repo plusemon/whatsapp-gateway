@@ -58,6 +58,24 @@ body {
   border: 1px solid rgba(244, 63, 94, 0.3);
 }
 
+/* Safe Area Inset Support for Mobile Browsers & Standalone PWAs */
+.pb-safe {
+  padding-bottom: 1.5rem;
+}
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 1.25rem);
+  }
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Subtle Card Borders & Surfaces */
+.card-border-subtle {
+  border-color: rgba(39, 39, 42, 0.7);
+}
+
 /* Smooth custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
@@ -85,3 +103,4 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+

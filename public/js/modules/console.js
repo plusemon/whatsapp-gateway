@@ -64,6 +64,79 @@ export function setSendTemplate(text) {
 }
 
 /**
+ * Sets quick preset message text into the quick test message textarea.
+ * @param {string} text 
+ */
+export function setQuickSendTemplate(text) {
+  const area = document.getElementById('quick-send-text');
+  if (area) area.value = text;
+  const mainArea = document.getElementById('send-text');
+  if (mainArea && !mainArea.value) mainArea.value = text;
+}
+
+/**
+ * Handles Quick Test Message submission.
+ * @param {Event} e 
+ */
+export async function handleQuickSendMessage(e) {
+  if (e) e.preventDefault();
+  const sessionId = document.getElementById('quick-send-session-id')?.value.trim();
+  const jid = document.getElementById('quick-send-jid')?.value.trim();
+  const text = document.getElementById('quick-send-text')?.value.trim();
+  const statusSpan = document.getElementById('quick-send-status');
+  const btn = document.getElementById('btn-quick-send');
+
+  if (!sessionId || !jid || !text) {
+    showToast('Please fill in Session ID, JID, and Message text', 'warn');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `
+      <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+      <span>Simulating Presence...</span>
+    `;
+  }
+  if (statusSpan) {
+    statusSpan.textContent = 'Simulating composing presence (600-1400ms)...';
+    statusSpan.className = 'text-xs text-amber-400';
+  }
+
+  try {
+    const data = await MessageApi.sendTextMessage(sessionId, jid, text);
+
+    if (data && data.success) {
+      if (statusSpan) {
+        statusSpan.textContent = '✓ Message dispatched! ID: ' + (data.messageId || 'ok');
+        statusSpan.className = 'text-xs text-emerald-400 font-mono';
+      }
+      showToast(`Test message dispatched to ${jid}`);
+    } else {
+      if (statusSpan) {
+        statusSpan.textContent = 'Error: ' + (data?.message || 'Failed to send');
+        statusSpan.className = 'text-xs text-rose-400 font-mono';
+      }
+      showToast(data?.message || 'Failed to send message', 'error');
+    }
+  } catch (err) {
+    if (statusSpan) {
+      statusSpan.textContent = 'Request failed: ' + err.message;
+      statusSpan.className = 'text-xs text-rose-400 font-mono';
+    }
+    showToast('Send error: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+        <span>Send Test Message</span>
+      `;
+    }
+  }
+}
+
+/**
  * Handles Outbound Text Message form submission.
  * @param {Event} e 
  */

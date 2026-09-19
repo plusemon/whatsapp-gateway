@@ -11,7 +11,13 @@
  */
 export async function safeFetchJson(url, options = {}) {
   try {
-    const res = await fetch(url, options);
+    const headers = new Headers(options.headers || {});
+    const apiKey = typeof window !== 'undefined' ? (localStorage.getItem('botla_api_key') || window.__BOTLA_API_KEY__) : null;
+    if (apiKey && !headers.has('x-api-key') && !headers.has('authorization')) {
+      headers.set('x-api-key', apiKey);
+    }
+    
+    const res = await fetch(url, { ...options, headers });
     const contentType = res.headers.get('content-type') || '';
     if (!res.ok) {
       if (contentType.includes('application/json')) {
@@ -23,7 +29,7 @@ export async function safeFetchJson(url, options = {}) {
     if (!contentType.includes('application/json')) return null;
     return await res.json();
   } catch (err) {
-    console.error(`[API] Fetch failure on ${url}:`, err);
+    console.warn(`[API] Fetch notice on ${url}:`, err?.message || err);
     return null;
   }
 }

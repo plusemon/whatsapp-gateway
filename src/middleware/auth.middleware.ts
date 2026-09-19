@@ -15,28 +15,49 @@ export async function authMiddleware(
     return;
   }
 
-  // Bypass auth for health, version, SSE streams, UI routes and mock webhook
-  const publicPaths = ['/api/health', '/api/system/version', '/api/webhook/mock', '/api/logs/stream'];
-  if (publicPaths.includes(request.url.split('?')[0])) {
+  // Bypass auth for health, version, SSE streams, event buffer, log telemetry, and maintenance
+  const publicPaths = [
+    '/api/health',
+    '/api/system/version',
+    '/api/events',
+    '/api/logs',
+    '/api/logs/stream',
+    '/api/logs/files',
+    '/api/logs/view',
+    '/api/logs/download',
+    '/api/logs/clear',
+    '/api/logs/cleanup',
+    '/api/media/cleanup',
+    '/api/webhook/mock',
+  ];
+  
+  const pathWithoutQuery = request.url.split('?')[0];
+
+  // Allow read-only public paths and GET /api/sessions without requiring auth header
+  if (
+    publicPaths.includes(pathWithoutQuery) ||
+    (request.method === 'GET' && pathWithoutQuery === '/api/sessions')
+  ) {
     return;
   }
 
   const apiKeyHeader = request.headers['x-api-key'] as string | undefined;
   const authHeader = request.headers.authorization;
+  const queryApiKey = (request.query as any)?.apiKey || (request.query as any)?.api_key;
   let bearerToken: string | undefined;
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
     bearerToken = authHeader.slice(7).trim();
   }
 
-  const providedKey = apiKeyHeader || bearerToken;
+  const providedKey = apiKeyHeader || bearerToken || queryApiKey;
 
   if (!providedKey || providedKey !== config.apiKey) {
-    ResponseUtil.error(
+    return ResponseUtil.error(
       reply,
       'Unauthorized: Valid API Key or Bearer token is required',
       401,
       'UNAUTHORIZED'
-    );
+    ) as unknown as void;
   }
 }

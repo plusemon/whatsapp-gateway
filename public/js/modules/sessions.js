@@ -168,10 +168,12 @@ export async function initSession() {
  * @param {string} sessionId 
  */
 export function fillSender(sessionId) {
+  const quickInput = document.getElementById('quick-send-session-id');
   const sendInput = document.getElementById('send-session-id');
   const mediaInput = document.getElementById('media-session-id');
   const pairInput = document.getElementById('pair-code-session');
 
+  if (quickInput) quickInput.value = sessionId;
   if (sendInput) sendInput.value = sessionId;
   if (mediaInput) mediaInput.value = sessionId;
   if (pairInput) pairInput.value = sessionId;
@@ -184,8 +186,12 @@ export function fillSender(sessionId) {
 export function selectSessionForSend(sessionId) {
   fillSender(sessionId);
   switchTab('sender');
-  const sendText = document.getElementById('send-text');
-  if (sendText) sendText.focus();
+  setTimeout(() => {
+    const quickText = document.getElementById('quick-send-text');
+    const sendText = document.getElementById('send-text');
+    if (quickText) quickText.focus();
+    else if (sendText) sendText.focus();
+  }, 50);
   showToast(`Selected '${sessionId}' in console`);
 }
 
