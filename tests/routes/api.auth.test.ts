@@ -12,7 +12,14 @@ describe('Fastify API Auth Middleware (api.auth.test.ts)', () => {
   beforeAll(async () => {
     process.env.API_GATEWAY_KEY = TEST_API_KEY;
 
-    app = Fastify({ logger: false });
+    app = Fastify({
+      logger: false,
+      ajv: {
+        customOptions: {
+          strict: false,
+        },
+      },
+    });
 
     // Handle empty JSON bodies gracefully
     app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {

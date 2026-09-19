@@ -11,6 +11,7 @@ import Fastify from 'fastify';
 import { config, getPublicBaseUrl } from './config/env.js';
 import { disconnectRedisClient } from './config/redis.js';
 import { registerErrorHandlers } from './middleware/errorHandler.js';
+import swaggerPlugin from './plugins/swagger.plugin.js';
 import { apiRoutes } from './routes/api.routes.js';
 import { getDashboardHtml, uiRoutes } from './routes/ui.routes.js';
 import { sessionService } from './services/session.service.js';
@@ -22,6 +23,11 @@ export async function buildServer() {
   const fastify = Fastify({
     logger: false, // We route logging through our unified Pino multi-stream
     disableRequestLogging: true,
+    ajv: {
+      customOptions: {
+        strict: false,
+      },
+    },
   });
 
   // 1. Cross-Origin Resource Sharing (CORS)
@@ -81,10 +87,13 @@ export async function buildServer() {
     index: false,
   });
 
-  // 3. Register global error & JSON 404 handlers
+  // 3. Register OpenAPI 3.0 & Swagger UI Plugin (/docs, /docs/json)
+  await fastify.register(swaggerPlugin);
+
+  // 4. Register global error & JSON 404 handlers
   registerErrorHandlers(fastify, getDashboardHtml);
 
-  // 4. Register API Routes under /api prefix
+  // 5. Register API Routes under /api prefix
   await fastify.register(apiRoutes, { prefix: '/api' });
 
   // 5. Register UI Routes (Dashboard on / and /index.html)
@@ -174,8 +183,10 @@ export async function startServer() {
   }
 }
 
-// Auto-boot if executed as main module
-startServer().catch((err) => {
-  logger.fatal({ err }, '[Server] Startup bootstrap failure');
-  process.exit(1);
-});
+// Auto-boot if executed directly (not imported in test environments)
+if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+  startServer().catch((err) => {
+    logger.fatal({ err }, '[Server] Startup bootstrap failure');
+    process.exit(1);
+  });
+}
