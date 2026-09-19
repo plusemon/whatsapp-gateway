@@ -32,6 +32,7 @@ import {
   requestPairingCode,
   selectSessionForSend,
   setSessionInput,
+  stopQrPolling,
   switchPairingTab,
   viewQr,
 } from './modules/sessions.js';
@@ -66,6 +67,16 @@ import {
   triggerMediaCleanup,
 } from './modules/logs.js';
 
+// Import Webhook Settings
+import {
+  loadWebhookSettings,
+  openWebhookSettingsModal,
+  closeWebhookSettingsModal,
+  toggleWebhookSecretVisibility,
+  saveWebhookSettings,
+  testWebhookPing,
+} from './modules/webhook.js';
+
 // Global refresh trigger
 export async function manualRefreshAll() {
   const icon = document.getElementById('manual-refresh-icon');
@@ -75,8 +86,9 @@ export async function manualRefreshAll() {
       checkHealth(),
       loadSessions(),
       fetchEvents(),
+      loadWebhookSettings(),
     ]);
-    showToast('Telemetry and sessions refreshed');
+    showToast('Telemetry, sessions and webhook status refreshed');
   } finally {
     if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 500);
   }
@@ -106,6 +118,7 @@ Object.assign(window, {
   purgeSession,
   openQrModal,
   closeQrModal,
+  stopQrPolling,
   switchPairingTab,
   viewQr,
   fetchAndDisplayQr,
@@ -138,6 +151,14 @@ Object.assign(window, {
   fetchEvents,
   renderEvents,
   copyEventPayload,
+
+  // Webhook Settings
+  loadWebhookSettings,
+  openWebhookSettingsModal,
+  closeWebhookSettingsModal,
+  toggleWebhookSecretVisibility,
+  saveWebhookSettings,
+  testWebhookPing,
 });
 
 /**
@@ -175,10 +196,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const webhookSettingsModal = document.getElementById('webhook-settings-modal');
+  if (webhookSettingsModal) {
+    webhookSettingsModal.addEventListener('click', (e) => {
+      if (e.target === webhookSettingsModal) closeWebhookSettingsModal();
+    });
+  }
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       closePurgeModal();
       closeQrModal();
+      closeWebhookSettingsModal();
     }
   });
 
@@ -187,6 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSessions();
   fetchEvents();
   initLogStreamSSE();
+  loadWebhookSettings();
 
   // Background Polling
   setInterval(fetchEvents, 3000);

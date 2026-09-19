@@ -16,21 +16,25 @@ export class SessionController {
    * Initializes or boots the WhatsApp Baileys socket session.
    */
   public static async initSession(
-    request: FastifyRequest<{ Params: SessionParams }>,
+    request: FastifyRequest<{ Params: SessionParams; Body?: { authMode?: 'qr' | 'pairing_code' } }>,
     reply: FastifyReply
   ): Promise<FastifyReply> {
     const { id } = request.params;
+    const authMode = request.body?.authMode || 'qr';
 
     try {
-      const sessionMeta = await sessionService.initSession(id);
+      const sessionMeta = await sessionService.initSession(id, authMode);
       return ResponseUtil.success(
         reply,
         {
           sessionId: id,
           status: sessionMeta.status,
+          authMode: sessionMeta.authMode,
           message:
             sessionMeta.status === 'connected'
               ? 'Session is already connected'
+              : authMode === 'pairing_code'
+              ? 'Session socket initialized in pairing code mode (QR generation suppressed)'
               : 'Session socket initialized; waiting for QR scan or connection',
           qr: sessionMeta.qr,
         },
@@ -59,9 +63,8 @@ export class SessionController {
   ): Promise<FastifyReply> {
     const { id } = request.params;
     const meta = sessionService.getSession(id);
-    const rawQr = await sessionService.getQR(id);
 
-    if (!meta && !rawQr) {
+    if (!meta) {
       return ResponseUtil.error(
         reply,
         `Session '${id}' does not exist. Call POST /api/sessions/${id}/init first.`,
@@ -71,6 +74,20 @@ export class SessionController {
         { sessionId: id, qr: null, status: 'disconnected' }
       );
     }
+
+    // Strict Guard: If in pairing code mode, reject QR generation
+    if (meta.authMode === 'pairing_code' || sessionService.isPairingMode(id)) {
+      return ResponseUtil.error(
+        reply,
+        'Session is currently authenticated via pairing code. QR requests are disabled.',
+        409,
+        'PAIRING_MODE_ACTIVE',
+        null,
+        { sessionId: id, qr: null, status: meta.status, authMode: meta.authMode }
+      );
+    }
+
+    const rawQr = await sessionService.getQR(id);
 
     let qrDataUrl: string | null = null;
     if (rawQr) {

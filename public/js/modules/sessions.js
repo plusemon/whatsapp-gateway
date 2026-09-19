@@ -258,6 +258,13 @@ export function purgeSession(sessionId) {
 /**
  * QR & Phone Pairing Modal Controls
  */
+export function stopQrPolling() {
+  if (qrPollInterval) {
+    clearInterval(qrPollInterval);
+    qrPollInterval = null;
+  }
+}
+
 export function openQrModal() {
   const modal = document.getElementById('qr-modal');
   if (modal) modal.classList.remove('hidden');
@@ -266,41 +273,44 @@ export function openQrModal() {
 export function closeQrModal() {
   const modal = document.getElementById('qr-modal');
   if (modal) modal.classList.add('hidden');
-  if (qrPollInterval) {
-    clearInterval(qrPollInterval);
-    qrPollInterval = null;
-  }
+  stopQrPolling();
+  activeQrSession = null;
 }
 
-export function switchPairingTab(tab) {
+export async function switchPairingTab(tab) {
   const viewQr = document.getElementById('pairing-view-qr');
   const viewCode = document.getElementById('pairing-view-code');
   const btnQr = document.getElementById('pairing-tab-qr');
   const btnCode = document.getElementById('pairing-tab-code');
+
+  // Immediately stop any running QR polling interval on tab switch
+  stopQrPolling();
 
   if (tab === 'qr') {
     if (viewQr) viewQr.classList.remove('hidden');
     if (viewCode) viewCode.classList.add('hidden');
     if (btnQr) btnQr.className = 'py-2 px-3 rounded-lg bg-zinc-800 text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
     if (btnCode) btnCode.className = 'py-2 px-3 rounded-lg text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
-    fetchAndDisplayQr();
-    if (!qrPollInterval) {
-      qrPollInterval = setInterval(fetchAndDisplayQr, 3000);
+    if (activeQrSession) {
+      await SessionApi.initSession(activeQrSession, 'qr');
+      await fetchAndDisplayQr();
+      if (!qrPollInterval && activeQrSession) {
+        qrPollInterval = setInterval(fetchAndDisplayQr, 3000);
+      }
     }
   } else {
+    // Code tab: ensure view code is shown and view QR hidden
     if (viewQr) viewQr.classList.add('hidden');
     if (viewCode) viewCode.classList.remove('hidden');
     if (btnCode) btnCode.className = 'py-2 px-3 rounded-lg bg-zinc-800 text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
     if (btnQr) btnQr.className = 'py-2 px-3 rounded-lg text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5';
-    if (qrPollInterval) {
-      clearInterval(qrPollInterval);
-      qrPollInterval = null;
-    }
   }
 }
 
 export async function viewQr(sessionId) {
   activeQrSession = sessionId;
+  stopQrPolling();
+
   const sessionLabel = document.getElementById('qr-session-label');
   const pairCodeSession = document.getElementById('pair-code-session');
 
@@ -309,20 +319,67 @@ export async function viewQr(sessionId) {
   openQrModal();
 
   const isCodeTab = !document.getElementById('pairing-view-code')?.classList.contains('hidden');
-  if (qrPollInterval) {
-    clearInterval(qrPollInterval);
-    qrPollInterval = null;
-  }
   if (!isCodeTab) {
+    await SessionApi.initSession(activeQrSession, 'qr');
     await fetchAndDisplayQr();
-    qrPollInterval = setInterval(fetchAndDisplayQr, 3000);
+    if (!qrPollInterval && activeQrSession) {
+      qrPollInterval = setInterval(fetchAndDisplayQr, 3000);
+    }
   }
 }
 
 export async function fetchAndDisplayQr() {
-  if (!activeQrSession) return;
+  if (!activeQrSession) {
+    stopQrPolling();
+    return;
+  }
+
+  // Guard: If modal is hidden, stop QR polling immediately
+  const modal = document.getElementById('qr-modal');
+  if (!modal || modal.classList.contains('hidden')) {
+    stopQrPolling();
+    return;
+  }
+
+  // Guard: If user is on the Code tab, cancel QR polling and exit
+  const isCodeTab = !document.getElementById('pairing-view-code')?.classList.contains('hidden');
+  if (isCodeTab) {
+    stopQrPolling();
+    return;
+  }
+
   const data = await SessionApi.getQr(activeQrSession);
   if (!data) return;
+
+  // Guard: If session is in pairing code mode, stop polling and display message
+  if (
+    data.error?.code === 'PAIRING_MODE_ACTIVE' ||
+    data.code === 'PAIRING_MODE_ACTIVE' ||
+    data.authMode === 'pairing_code' ||
+    (data.message && data.message.includes('Phone Pairing Code mode active'))
+  ) {
+    stopQrPolling();
+    const placeholder = document.getElementById('qr-placeholder');
+    const img = document.getElementById('qr-image');
+    const badge = document.getElementById('qr-status-badge');
+
+    if (img) img.classList.add('hidden');
+    if (placeholder) {
+      placeholder.classList.remove('hidden');
+      placeholder.innerHTML = `
+        <div class="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-1">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+        </div>
+        <span class="text-emerald-400 font-semibold text-sm">Pairing Code Mode Active</span>
+        <span class="text-zinc-400 text-xs text-center max-w-xs">Session is in phone pairing mode. QR requests disabled.</span>
+      `;
+    }
+    if (badge) {
+      badge.textContent = 'Pairing Code Active';
+      badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+    }
+    return;
+  }
 
   const placeholder = document.getElementById('qr-placeholder');
   const img = document.getElementById('qr-image');
@@ -344,10 +401,7 @@ export async function fetchAndDisplayQr() {
       badge.textContent = 'Active & Connected';
       badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-medium badge-online';
     }
-    if (qrPollInterval) {
-      clearInterval(qrPollInterval);
-      qrPollInterval = null;
-    }
+    stopQrPolling();
     loadSessions();
   } else if (data.status === 'qr_expired') {
     if (img) img.classList.add('hidden');
@@ -397,6 +451,7 @@ export async function fetchAndDisplayQr() {
 }
 
 export async function refreshQrSession(sessionId) {
+  stopQrPolling();
   showToast('Generating fresh QR code...');
   const placeholder = document.getElementById('qr-placeholder');
   const img = document.getElementById('qr-image');
@@ -409,19 +464,16 @@ export async function refreshQrSession(sessionId) {
       <span class="text-zinc-500 text-[11px]">Connecting Baileys engine</span>
     `;
   }
-  await SessionApi.initSession(sessionId);
+  await SessionApi.initSession(sessionId, 'qr');
   await fetchAndDisplayQr();
-  if (!qrPollInterval) {
+  if (!qrPollInterval && activeQrSession) {
     qrPollInterval = setInterval(fetchAndDisplayQr, 3000);
   }
   loadSessions();
 }
 
 export async function requestPairingCode() {
-  if (qrPollInterval) {
-    clearInterval(qrPollInterval);
-    qrPollInterval = null;
-  }
+  stopQrPolling();
 
   const sessionInput = document.getElementById('pair-code-session');
   const phoneInput = document.getElementById('pair-code-phone');

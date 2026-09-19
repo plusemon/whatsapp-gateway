@@ -1,12 +1,22 @@
 /**
  * Session Lifecycle and Metadata Type Definitions
  */
-import type { WAVersion } from '@whiskeysockets/baileys';
+import type { WASocket, WAVersion } from '@whiskeysockets/baileys';
 
 /**
  * Authentication mode for the session socket lifecycle.
  */
 export type AuthMode = 'qr' | 'pairing_code';
+
+/**
+ * Session Instance state tracking.
+ */
+export interface SessionInstance {
+  sock: WASocket;
+  authMode: AuthMode;
+  phoneNumber?: string;
+  isReconnecting?: boolean;
+}
 
 /**
  * Current connection lifecycle status for a tenant session.

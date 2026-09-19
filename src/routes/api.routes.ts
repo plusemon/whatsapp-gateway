@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { MessageController } from '../controllers/message.controller.js';
 import { SessionController } from '../controllers/session.controller.js';
 import { SystemController } from '../controllers/system.controller.js';
+import { SettingsController } from '../controllers/settings.controller.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 
 export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
@@ -34,6 +35,11 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
 
   // Mock Laravel webhook receiver for local testing
   fastify.post('/webhook/mock', SystemController.mockWebhook);
+
+  // Dynamic Webhook Settings & Test Ping
+  fastify.get('/settings/webhook', SettingsController.getWebhookSettings);
+  fastify.post('/settings/webhook', SettingsController.updateWebhookSettings);
+  fastify.post('/settings/webhook/test', SettingsController.testWebhook);
 
   /* -------------------------------------------------------------------------- */
   /* WhatsApp Session Management Endpoints                                      */

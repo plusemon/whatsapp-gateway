@@ -52,7 +52,11 @@ export const SystemApi = {
  */
 export const SessionApi = {
   listSessions: () => safeFetchJson('/api/sessions'),
-  initSession: (sessionId) => safeFetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/init`, { method: 'POST' }),
+  initSession: (sessionId, authMode = 'qr') => safeFetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ authMode }),
+  }),
   getQr: (sessionId) => safeFetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/qr`),
   requestPairingCode: (sessionId, phoneNumber) => safeFetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/pair-code`, {
     method: 'POST',
