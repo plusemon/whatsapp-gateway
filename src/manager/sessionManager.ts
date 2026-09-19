@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { Boom } from '@hapi/boom';
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
   downloadMediaMessage,
   proto,
@@ -127,15 +128,16 @@ export class SessionManager {
       const baileysLogger = logger.child({ module: 'baileys', sessionId });
       baileysLogger.level = 'warn';
 
-      // Step B: Create WASocket instance with synchronized protocol version
+      // Step B: Create WASocket instance with synchronized protocol version and standard browser signature
       const sock = makeWASocket({
         version,
         auth: state,
         logger: baileysLogger,
         printQRInTerminal: false,
-        browser: ['Botla WhatsApp Gateway', 'Chrome', '124.0.0.0'],
+        browser: Browsers.macOS('Desktop'), // CRITICAL: Standard recognized client signature to prevent pairing rejection
         syncFullHistory: false,
-        generateHighQualityLinkPreview: true,
+        markOnlineOnConnect: false,
+        generateHighQualityLinkPreview: false,
       });
 
       this.activeSockets.set(sessionId, sock);

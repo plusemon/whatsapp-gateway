@@ -561,6 +561,53 @@
     </div>
   </div>
 
+  <!-- ======================================================== -->
+  <!-- MODAL: CONFIRM PURGE SESSION -->
+  <!-- ======================================================== -->
+  <div id="purge-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-opacity duration-200">
+    <div class="card-surface w-full max-w-md rounded-2xl p-5 sm:p-6 shadow-2xl relative border border-zinc-800 space-y-4">
+      
+      <!-- Icon & Header -->
+      <div class="flex items-start gap-3.5">
+        <div class="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 flex-shrink-0 mt-0.5">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+          </svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <h3 class="text-base sm:text-lg font-bold text-white">Purge Tenant Session</h3>
+          <p class="text-xs text-zinc-400 mt-0.5">Disconnect socket and wipe persistent Redis state</p>
+        </div>
+        <button onclick="closePurgeModal()" class="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition active:scale-95 cursor-pointer" title="Close modal">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+
+      <!-- Warning Box -->
+      <div class="p-3.5 rounded-xl bg-zinc-950/80 border border-zinc-800/90 text-xs space-y-2">
+        <div class="flex items-center gap-2">
+          <span class="text-zinc-400">Target Session:</span>
+          <span id="purge-target-session-id" class="px-2 py-0.5 rounded bg-zinc-900 text-rose-300 font-mono font-semibold border border-rose-900/30">tenant-botla-1</span>
+        </div>
+        <p class="text-zinc-400 leading-relaxed text-[11px]">
+          This action will immediately terminate the Baileys socket, disconnect WhatsApp, and permanently purge all authentication keys and credentials from Redis (<span class="font-mono text-zinc-300">wa:session:&lt;id&gt;:*</span>).
+        </p>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-800/80">
+        <button type="button" onclick="closePurgeModal()" class="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition active:scale-95 cursor-pointer">
+          Cancel
+        </button>
+        <button id="btn-confirm-purge" type="button" onclick="executePurgeSession()" class="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition active:scale-95 cursor-pointer flex items-center gap-1.5 shadow-sm">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+          <span id="btn-confirm-purge-text">Purge Session</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
   <!-- Sticky Mobile Bottom Navigation (< 1024px) -->
   <nav class="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 px-4 py-2 flex items-center justify-around text-xs">
     <button onclick="switchMobileTab('sessions')" id="bottom-nav-sessions" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-emerald-400 transition cursor-pointer">
@@ -880,29 +927,76 @@
       showToast(`Selected '${sessionId}' in console`);
     }
 
-    async function deleteSession(sessionId) {
-      if (!confirm(`Are you sure you want to disconnect socket and purge session '${sessionId}' from Redis?`)) {
-        return;
-      }
+    let targetPurgeSessionId = null;
+
+    function openPurgeModal(sessionId) {
+      if (!sessionId) return;
+      targetPurgeSessionId = sessionId;
+      const label = document.getElementById('purge-target-session-id');
+      if (label) label.textContent = sessionId;
+      const modal = document.getElementById('purge-modal');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    function closePurgeModal() {
+      const modal = document.getElementById('purge-modal');
+      if (modal) modal.classList.add('hidden');
+      targetPurgeSessionId = null;
+    }
+
+    async function executePurgeSession() {
+      const sessionId = targetPurgeSessionId;
+      if (!sessionId) return;
+
+      const btn = document.getElementById('btn-confirm-purge');
+      const btnText = document.getElementById('btn-confirm-purge-text');
+      if (btn) btn.disabled = true;
+      if (btnText) btnText.textContent = 'Purging...';
+
+      showToast(`Purging session '${sessionId}'...`);
 
       try {
-        const res = await fetch('/api/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
+        let res = await fetch('/api/sessions/' + encodeURIComponent(sessionId), {
+          method: 'DELETE',
+          headers: { 'Accept': 'application/json' }
+        });
+
+        // If DELETE is blocked by any proxy, fall back to POST /api/sessions/:id/purge
+        if (!res.ok && (res.status === 405 || res.status === 404)) {
+          res = await fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/purge', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+        }
+
         const data = await res.json().catch(() => ({}));
 
-        if (res.ok && data.success) {
-          showToast(`Session '${sessionId}' disconnected & purged`);
+        if (res.ok && (data.success || data.status === 'ok' || res.status === 200)) {
+          showToast(`Session '${sessionId}' purged successfully`);
+          closePurgeModal();
           if (activeQrSession === sessionId) {
             closeQrModal();
           }
           await loadSessions();
           fetchEvents();
         } else {
-          showToast(`Purge failed: ${data.message || 'Unknown'}`, 'error');
+          showToast(`Purge failed: ${data.message || data.error || 'Unknown error'}`, 'error');
         }
       } catch (err) {
-        showToast('Purge error: ' + err.message, 'error');
+        showToast('Purge request error: ' + err.message, 'error');
+      } finally {
+        if (btn) btn.disabled = false;
+        if (btnText) btnText.textContent = 'Purge Session';
       }
     }
+
+    function purgeSession(sessionId) {
+      openPurgeModal(sessionId);
+    }
+
+    // Retain deleteSession as backwards-compatible alias
+    const deleteSession = purgeSession;
 
     // ==========================================
     // QR Code Modal & Phone Pairing Code
@@ -923,10 +1017,16 @@
 
     // Close modal on Escape or backdrop click
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeQrModal();
+      if (e.key === 'Escape') {
+        closeQrModal();
+        closePurgeModal();
+      }
     });
-    document.getElementById('qr-modal').addEventListener('click', (e) => {
+    document.getElementById('qr-modal')?.addEventListener('click', (e) => {
       if (e.target === document.getElementById('qr-modal')) closeQrModal();
+    });
+    document.getElementById('purge-modal')?.addEventListener('click', (e) => {
+      if (e.target === document.getElementById('purge-modal')) closePurgeModal();
     });
 
     function switchPairingTab(tab) {
