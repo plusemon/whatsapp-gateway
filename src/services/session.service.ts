@@ -14,7 +14,7 @@ import makeWASocket, {
 import { clearRedisSession, useRedisAuthState } from '../adapters/redisAuthState.js';
 import { getRedisClient } from '../config/redis.js';
 import { formatPairingCode, sanitizePhoneNumber } from '../utils/jid.util.js';
-import { createSessionLogger, logger } from '../utils/logger.js';
+import { createSessionLogger, logGatewayEvent, logger } from '../utils/logger.js';
 import { getWhatsAppVersion } from '../utils/versionGuard.js';
 import { MediaService } from './media.service.js';
 import { MessageService } from './message.service.js';
@@ -58,6 +58,20 @@ export class SessionService {
     if (this.recentEvents.length > this.maxEvents) {
       this.recentEvents.pop();
     }
+  }
+
+  /**
+   * Emits live session events to the logger & event buffer for real-time SSE broadcasting to UI.
+   */
+  public emitEvent(sessionId: string, action: string, data: Record<string, any>): void {
+    const payload = {
+      action,
+      event: action,
+      sessionId,
+      ...data,
+    };
+    logGatewayEvent('info', `[SessionService] Session ${sessionId} event: ${action}`, sessionId, payload);
+    this.logEvent('session_event', sessionId, payload);
   }
 
   /**
@@ -331,12 +345,22 @@ export class SessionService {
           }
 
           sessionLog.info(
-            { user: meta.user, socketId: sock.user?.id },
-            '[SessionService] WhatsApp connection successfully established (open)'
+            { action: 'session_connected', event: 'session_connected', sessionId, status: 'connected', user: meta.user, socketId: sock.user?.id },
+            `[SessionService] Session ${sessionId} successfully connected!`
           );
           this.logEvent('session_event', sessionId, {
-            action: 'connected',
+            action: 'session_connected',
+            event: 'session_connected',
+            sessionId,
+            status: 'connected',
             user: meta.user,
+          });
+
+          // Emit live SSE event to the UI
+          this.emitEvent(sessionId, 'session_connected', {
+            sessionId,
+            status: 'connected',
+            user: meta.user || sock.user,
           });
         }
 
@@ -1029,6 +1053,64 @@ export class SessionService {
     this.activeSockets.clear();
     this.sessions.clear();
     logger.info('[SessionService] All active sockets closed.');
+  }
+
+  /**
+   * Gracefully unlinks WhatsApp session via sock.logout() without wiping tenant configuration.
+   */
+  public async logoutSession(sessionId: string): Promise<void> {
+    const sessionLog = createSessionLogger(sessionId);
+    this.terminatingSessions.add(sessionId);
+    this.pairingModeSessions.delete(sessionId);
+
+    const currentSession = this.sessions.get(sessionId);
+    const sock = currentSession?.sock || this.activeSockets.get(sessionId);
+    const meta = this.metadataMap.get(sessionId);
+
+    if (sock) {
+      try {
+        await sock.logout();
+        sessionLog.info('[SessionService] Socket logged out from WhatsApp');
+      } catch (err: any) {
+        sessionLog.warn({ err: err.message }, '[SessionService] sock.logout() warning, closing socket');
+        try {
+          if ((sock as any).ws && typeof (sock as any).ws.close === 'function') {
+            (sock as any).ws.close();
+          }
+          sock.end(undefined);
+        } catch {
+          // Ignore
+        }
+      }
+    }
+
+    this.activeSockets.delete(sessionId);
+    this.sessions.delete(sessionId);
+
+    if (meta) {
+      meta.status = 'disconnected';
+      meta.qr = null;
+      meta.user = null;
+      meta.lastActiveAt = Date.now();
+    }
+
+    try {
+      const redis = await getRedisClient();
+      await clearRedisSession(redis, sessionId);
+      sessionLog.info('[SessionService] Cleared Redis auth state on logout (tenant config preserved)');
+    } catch (err: any) {
+      sessionLog.warn({ err: err.message }, '[SessionService] Error clearing Redis credentials on logout');
+    }
+
+    setTimeout(() => {
+      this.terminatingSessions.delete(sessionId);
+    }, 4000);
+
+    this.emitEvent(sessionId, 'session_logged_out', {
+      sessionId,
+      status: 'disconnected',
+      message: 'WhatsApp session unlinked and logged out',
+    });
   }
 
   /**

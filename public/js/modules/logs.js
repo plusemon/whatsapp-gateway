@@ -84,6 +84,23 @@ export function initLogStreamSSE() {
           cachedLogsList.pop();
         }
 
+        // Detect session_connected SSE event and trigger pairing success handler
+        const action = logEntry.meta?.action || logEntry.meta?.event || logEntry.action || logEntry.event;
+        const sessionId = logEntry.sessionId || logEntry.meta?.sessionId;
+
+        if (
+          (action === 'session_connected' || action === 'connected' || (logEntry.message && logEntry.message.includes('successfully connected'))) &&
+          sessionId
+        ) {
+          if (typeof window !== 'undefined' && typeof window.handlePairingSuccess === 'function') {
+            window.handlePairingSuccess({
+              sessionId,
+              status: 'connected',
+              user: logEntry.meta?.user || { id: sessionId },
+            });
+          }
+        }
+
         if (!logStreamPaused && currentStreamTab === 'logs') {
           renderLogs();
         }

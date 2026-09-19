@@ -627,6 +627,26 @@
     </div>
   </div>
 
+  <!-- Session Logout Confirmation Modal -->
+  <div id="logout-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="card-surface rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl relative">
+      <div class="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+      </div>
+      <div class="text-center space-y-1">
+        <h3 class="font-bold text-white text-base">Logout & Unlink?</h3>
+        <p class="text-xs text-zinc-400">This will unlink the device from WhatsApp without wiping your local tenant configurations for session:</p>
+        <p id="logout-target-session-id" class="text-xs font-mono font-bold text-amber-400 py-1"></p>
+      </div>
+      <div class="grid grid-cols-2 gap-2 pt-2">
+        <button onclick="window.closeLogoutModal()" class="py-2.5 px-3 rounded-xl card-surface hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition cursor-pointer min-h-[44px]">Cancel</button>
+        <button id="btn-confirm-logout" onclick="window.executeLogoutSession()" class="py-2.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-amber-950/40 min-h-[44px]">
+          <span id="btn-confirm-logout-text">Logout Device</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Session Purge Confirmation Modal -->
   <div id="purge-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
     <div class="card-surface rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl relative">

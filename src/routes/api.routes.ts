@@ -140,6 +140,23 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     SessionController.deleteSession
   );
 
+  // Logout session (POST /sessions/:id/logout)
+  fastify.post(
+    '/sessions/:id/logout',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+          },
+        },
+      },
+    },
+    SessionController.logoutSession
+  );
+
   // Get session status
   fastify.get(
     '/sessions/:id/status',

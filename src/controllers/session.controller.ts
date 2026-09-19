@@ -189,6 +189,40 @@ export class SessionController {
   }
 
   /**
+   * POST /api/sessions/:id/logout
+   * Unlinks WhatsApp device without wiping local configs.
+   */
+  public static async logoutSession(
+    request: FastifyRequest<{ Params: SessionParams }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply> {
+    const { id } = request.params;
+
+    try {
+      await sessionService.logoutSession(id);
+      return ResponseUtil.success(
+        reply,
+        {
+          sessionId: id,
+          status: 'disconnected',
+          message: 'Session logged out and unlinked successfully',
+        },
+        200
+      );
+    } catch (err: any) {
+      request.log.error({ sessionId: id, err: err.message }, 'Failed to logout session');
+      return ResponseUtil.error(
+        reply,
+        `Error logging out session '${id}': ${err.message}`,
+        500,
+        'LOGOUT_FAILED',
+        null,
+        { sessionId: id }
+      );
+    }
+  }
+
+  /**
    * GET /api/sessions
    * Lists all active or registered sessions.
    */

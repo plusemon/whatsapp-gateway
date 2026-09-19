@@ -17,14 +17,18 @@ import {
 
 // Import Sessions management
 import {
+  closeLogoutModal,
   closePurgeModal,
   closeQrModal,
   copyPairCode,
+  executeLogoutSession,
   executePurgeSession,
   fetchAndDisplayQr,
   fillSender,
   initSession,
   loadSessions,
+  logoutSession,
+  openLogoutModal,
   openPurgeModal,
   openQrModal,
   purgeSession,
@@ -82,6 +86,9 @@ import {
   testWebhookPing,
 } from './modules/webhook.js';
 
+// Import QR Modal Component
+import { handlePairingSuccess } from './components/qrModal.js';
+
 // Global refresh trigger
 export async function manualRefreshAll() {
   const icon = document.getElementById('manual-refresh-icon');
@@ -113,6 +120,7 @@ Object.assign(window, {
 
   // Sessions
   loadSessions,
+  handlePairingSuccess,
   setSessionInput,
   initSession,
   fillSender,
@@ -121,6 +129,10 @@ Object.assign(window, {
   closePurgeModal,
   executePurgeSession,
   purgeSession,
+  openLogoutModal,
+  closeLogoutModal,
+  executeLogoutSession,
+  logoutSession,
   openQrModal,
   closeQrModal,
   stopQrPolling,
@@ -199,6 +211,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const logoutModal = document.getElementById('logout-modal');
+  if (logoutModal) {
+    logoutModal.addEventListener('click', (e) => {
+      if (e.target === logoutModal) closeLogoutModal();
+    });
+  }
+
   const qrModal = document.getElementById('qr-modal');
   if (qrModal) {
     qrModal.addEventListener('click', (e) => {
@@ -216,6 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       closePurgeModal();
+      closeLogoutModal();
       closeQrModal();
       closeWebhookSettingsModal();
     }

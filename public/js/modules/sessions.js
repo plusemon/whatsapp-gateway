@@ -4,10 +4,12 @@
  */
 import { SessionApi } from '../api.js';
 import { escapeHtml, showToast, switchTab } from './ui.js';
+import { renderSessionCard } from '../components/sessionCard.js';
 
 let activeQrSession = null;
 let qrPollInterval = null;
 let targetPurgeSessionId = null;
+let targetLogoutSessionId = null;
 
 /**
  * Loads all active sessions from the gateway and renders the UI cards.
@@ -47,68 +49,7 @@ export async function loadSessions() {
     return;
   }
 
-  container.innerHTML = sessions.map(s => {
-    let badgeClass = 'badge-offline';
-    let dotClass = 'bg-zinc-600';
-    let statusLabel = s.status || 'disconnected';
-
-    if (s.status === 'connected') {
-      badgeClass = 'badge-online';
-      dotClass = 'bg-emerald-400';
-    } else if (s.status === 'qr_ready') {
-      badgeClass = 'badge-qr';
-      dotClass = 'bg-indigo-400 animate-ping';
-    } else if (s.status === 'connecting') {
-      badgeClass = 'badge-connecting';
-      dotClass = 'bg-amber-400 animate-pulse';
-    }
-
-    const userPhone = s.user ? (s.user.id || s.user.name || 'Authenticated') : 'Awaiting authentication';
-
-    return `
-      <div class="p-4 rounded-xl bg-zinc-900/90 border border-zinc-800/80 hover:border-zinc-700/80 transition-all space-y-3">
-        <!-- Card Header -->
-        <div class="flex items-start justify-between gap-3">
-          <div class="flex items-center gap-3 min-w-0">
-            <div class="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center flex-shrink-0 relative">
-              <svg class="w-4 h-4 text-zinc-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
-              </svg>
-              <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ${dotClass}"></span>
-            </div>
-            <div class="min-w-0">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-mono text-white text-sm font-semibold truncate">${escapeHtml(s.id)}</span>
-                <span class="text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}">${escapeHtml(statusLabel)}</span>
-              </div>
-              <div class="text-xs text-zinc-400 truncate mt-0.5 flex items-center gap-1.5">
-                <span class="text-zinc-500">Target:</span>
-                <span class="text-zinc-300 font-mono">${escapeHtml(userPhone)}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Action Buttons -->
-        <div class="pt-2 border-t border-zinc-800/60 grid grid-cols-3 gap-2">
-          <button onclick="window.viewQr('${escapeHtml(s.id)}')" class="h-10 px-2.5 rounded-xl border border-zinc-700/80 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
-            <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
-            <span>Pairing</span>
-          </button>
-
-          <button onclick="window.selectSessionForSend('${escapeHtml(s.id)}')" class="h-10 px-2.5 rounded-xl border border-zinc-700/80 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-sm">
-            <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-            <span>Test Send</span>
-          </button>
-
-          <button onclick="window.purgeSession('${escapeHtml(s.id)}')" class="h-10 px-2.5 rounded-xl border border-rose-900/40 bg-rose-950/20 hover:bg-rose-900/40 text-rose-300 text-xs font-medium transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5">
-            <svg class="w-3.5 h-3.5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-            <span>Purge</span>
-          </button>
-        </div>
-      </div>
-    `;
-  }).join('');
+  container.innerHTML = sessions.map(s => renderSessionCard(s)).join('');
 }
 
 /**
@@ -256,6 +197,90 @@ export function purgeSession(sessionId) {
 }
 
 /**
+ * Opens logout confirmation modal.
+ * @param {string} sessionId 
+ */
+export function openLogoutModal(sessionId) {
+  if (!sessionId) return;
+  targetLogoutSessionId = sessionId;
+  const label = document.getElementById('logout-target-session-id');
+  if (label) label.textContent = sessionId;
+  const modal = document.getElementById('logout-modal');
+  if (modal) modal.classList.remove('hidden');
+}
+
+/**
+ * Closes logout confirmation modal.
+ */
+export function closeLogoutModal() {
+  const modal = document.getElementById('logout-modal');
+  if (modal) modal.classList.add('hidden');
+  targetLogoutSessionId = null;
+}
+
+/**
+ * Executes logout request and unlinks WhatsApp device without deleting local tenant configurations.
+ */
+export async function executeLogoutSession() {
+  const sessionId = targetLogoutSessionId;
+  if (!sessionId) return;
+
+  const btn = document.getElementById('btn-confirm-logout');
+  const btnText = document.getElementById('btn-confirm-logout-text');
+  if (btn) btn.disabled = true;
+  if (btnText) btnText.textContent = 'Logging out...';
+
+  showToast(`Unlinking session '${sessionId}'...`);
+
+  try {
+    const data = await SessionApi.logoutSession(sessionId);
+    if (data && (data.success || data.status === 'ok' || data.status === 'disconnected')) {
+      showToast(`Session '${sessionId}' logged out & unlinked successfully`);
+      closeLogoutModal();
+      if (activeQrSession === sessionId) {
+        closeQrModal();
+      }
+      await loadSessions();
+    } else {
+      showToast(`Logout failed: ${data?.message || data?.error || 'Unknown error'}`, 'error');
+    }
+  } catch (err) {
+    showToast('Logout request error: ' + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btnText) btnText.textContent = 'Logout Device';
+  }
+}
+
+export function logoutSession(sessionId) {
+  openLogoutModal(sessionId);
+}
+
+/**
+ * Returns current active QR session identifier.
+ */
+export function getActiveQrSession() {
+  return activeQrSession;
+}
+
+/**
+ * Instantly updates dashboard session card UI when connection state changes.
+ */
+export function updateDashboardSessionCard(sessionId, status, userPhone) {
+  if (!sessionId) return;
+  const card = document.getElementById(`session-${sessionId}`) || document.getElementById(`session-card-${sessionId}`);
+  if (!card) return;
+
+  // Seamlessly re-render the card with fresh state hierarchy and action buttons
+  card.outerHTML = renderSessionCard({
+    id: sessionId,
+    status: status || 'connected',
+    user: userPhone,
+    lastActiveAt: Date.now(),
+  });
+}
+
+/**
  * QR & Phone Pairing Modal Controls
  */
 export function stopQrPolling() {
@@ -386,23 +411,27 @@ export async function fetchAndDisplayQr() {
   const badge = document.getElementById('qr-status-badge');
 
   if (data.status === 'connected') {
-    if (img) img.classList.add('hidden');
-    if (placeholder) {
-      placeholder.classList.remove('hidden');
-      placeholder.innerHTML = `
-        <div class="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-1">
-          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
-        </div>
-        <span class="text-emerald-400 font-bold text-base">Connected & Authenticated</span>
-        <span class="text-zinc-400 text-xs text-center max-w-xs">WhatsApp socket is actively linked. You can now dispatch messages.</span>
-      `;
+    if (typeof window !== 'undefined' && typeof window.handlePairingSuccess === 'function') {
+      window.handlePairingSuccess({ sessionId: activeQrSession, status: 'connected', user: data.user });
+    } else {
+      if (img) img.classList.add('hidden');
+      if (placeholder) {
+        placeholder.classList.remove('hidden');
+        placeholder.innerHTML = `
+          <div class="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-1">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
+          </div>
+          <span class="text-emerald-400 font-bold text-base">Connected & Authenticated</span>
+          <span class="text-zinc-400 text-xs text-center max-w-xs">WhatsApp socket is actively linked. You can now dispatch messages.</span>
+        `;
+      }
+      if (badge) {
+        badge.textContent = 'Active & Connected';
+        badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-medium badge-online';
+      }
+      stopQrPolling();
+      loadSessions();
     }
-    if (badge) {
-      badge.textContent = 'Active & Connected';
-      badge.className = 'px-2.5 py-0.5 rounded-full text-xs font-medium badge-online';
-    }
-    stopQrPolling();
-    loadSessions();
   } else if (data.status === 'qr_expired') {
     if (img) img.classList.add('hidden');
     if (placeholder) {
