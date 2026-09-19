@@ -133,8 +133,37 @@ export interface LogViewResponse {
   lines: number;
   content: string;
   totalSizeBytes?: number;
+  sizeBytes?: number;
   sizeFormatted?: string;
   modifiedAt?: string;
+  data?: {
+    filename: string;
+    lines: number;
+    content: string;
+    totalSizeBytes?: number;
+    sizeBytes?: number;
+    sizeFormatted?: string;
+    modifiedAt?: string;
+  };
+}
+
+/**
+ * Payload for POST /api/logs/clear
+ */
+export interface LogClearRequest {
+  file: string;
+}
+
+/**
+ * Response for POST /api/logs/clear
+ */
+export interface LogClearResponse {
+  file: string;
+  clearedFiles: string[];
+  freedBytes: number;
+  freedBytesFormatted: string;
+  message: string;
+  timestamp: string;
 }
 
 /**

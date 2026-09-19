@@ -361,12 +361,17 @@ export class SystemController {
           lines: actualLineCount,
           content,
           totalSizeBytes: stat.size,
+          sizeBytes: stat.size,
           sizeFormatted: formatBytes(stat.size),
           modifiedAt: new Date(stat.mtimeMs).toISOString(),
           data: {
             filename,
             lines: actualLineCount,
             content,
+            totalSizeBytes: stat.size,
+            sizeBytes: stat.size,
+            sizeFormatted: formatBytes(stat.size),
+            modifiedAt: new Date(stat.mtimeMs).toISOString(),
           },
         },
         200
@@ -374,6 +379,122 @@ export class SystemController {
     } catch (err: any) {
       request.log.error({ err: err.message }, 'Failed to read log file');
       return ResponseUtil.error(reply, 'Failed to read log file: ' + err.message, 500, 'READ_LOG_FAILED');
+    }
+  }
+
+  /**
+   * POST /api/logs/clear
+   * Safely truncates the specified log file or all log files to 0 bytes without destroying the open file handle.
+   */
+  public static async clearLogFile(
+    request: FastifyRequest<{
+      Body: {
+        file?: string;
+      };
+    }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply> {
+    try {
+      const target = request.body?.file?.trim();
+      if (!target) {
+        return ResponseUtil.error(reply, "Body parameter 'file' is required", 400, 'MISSING_PARAM_FILE');
+      }
+
+      const logsDir = path.resolve(process.cwd(), 'storage/logs');
+      if (!fs.existsSync(logsDir)) {
+        await fs.promises.mkdir(logsDir, { recursive: true });
+      }
+
+      const clearedFiles: string[] = [];
+      let totalFreedBytes = 0;
+
+      if (target.toLowerCase() === 'all') {
+        const entries = await fs.promises.readdir(logsDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isFile()) {
+            const filePath = path.join(logsDir, entry.name);
+            try {
+              const stat = await fs.promises.stat(filePath);
+              totalFreedBytes += stat.size;
+              // Truncate to 0 bytes preserving inode
+              await fs.promises.writeFile(filePath, '', 'utf-8');
+              clearedFiles.push(entry.name);
+            } catch (fileErr: any) {
+              request.log.warn({ file: entry.name, err: fileErr.message }, 'Failed to truncate single log file in all mode');
+            }
+          }
+        }
+
+        logger.info({ clearedFiles, freedBytes: totalFreedBytes }, '[SystemController] Truncated all log files');
+        return ResponseUtil.success(
+          reply,
+          {
+            file: 'all',
+            clearedFiles,
+            freedBytes: totalFreedBytes,
+            freedBytesFormatted: formatBytes(totalFreedBytes),
+            message: `Successfully truncated ${clearedFiles.length} log file(s)`,
+            timestamp: new Date().toISOString(),
+          },
+          200
+        );
+      }
+
+      // Security: Strict path traversal prevention
+      if (target.includes('..') || target.includes('/') || target.includes('\\')) {
+        return ResponseUtil.error(reply, 'Invalid file name: directory traversal characters forbidden', 400, 'INVALID_FILENAME');
+      }
+
+      const filename = path.basename(target);
+      const filePath = path.resolve(logsDir, filename);
+
+      if (!filePath.startsWith(logsDir)) {
+        return ResponseUtil.error(reply, 'Access denied: Path is outside storage/logs directory', 403, 'FORBIDDEN_PATH');
+      }
+
+      if (!fs.existsSync(filePath)) {
+        // Create as empty if it doesn't exist
+        await fs.promises.writeFile(filePath, '', 'utf-8');
+        return ResponseUtil.success(
+          reply,
+          {
+            file: filename,
+            clearedFiles: [filename],
+            freedBytes: 0,
+            freedBytesFormatted: '0 B',
+            message: `Log file '${filename}' initialized empty`,
+            timestamp: new Date().toISOString(),
+          },
+          200
+        );
+      }
+
+      const stat = await fs.promises.stat(filePath);
+      if (!stat.isFile()) {
+        return ResponseUtil.error(reply, 'Target is not a regular file', 400, 'INVALID_FILE_TYPE');
+      }
+
+      totalFreedBytes = stat.size;
+      // Truncate file content to 0 bytes keeping active file handle intact
+      await fs.promises.writeFile(filePath, '', 'utf-8');
+      clearedFiles.push(filename);
+
+      logger.info({ file: filename, freedBytes: totalFreedBytes }, '[SystemController] Truncated log file');
+      return ResponseUtil.success(
+        reply,
+        {
+          file: filename,
+          clearedFiles,
+          freedBytes: totalFreedBytes,
+          freedBytesFormatted: formatBytes(totalFreedBytes),
+          message: `Log file '${filename}' truncated successfully`,
+          timestamp: new Date().toISOString(),
+        },
+        200
+      );
+    } catch (err: any) {
+      request.log.error({ err: err.message }, 'Failed to clear log file');
+      return ResponseUtil.error(reply, 'Failed to clear log file: ' + err.message, 500, 'CLEAR_LOG_FAILED');
     }
   }
 

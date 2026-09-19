@@ -22,10 +22,25 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // WhatsApp Web protocol version cache & sync
   fastify.get('/system/version', SessionController.getVersion);
 
-  // Storage retention cleanups
+  // Storage retention cleanups & log management
   fastify.post('/media/cleanup', SystemController.cleanupMedia);
   fastify.post('/logs/cleanup', SystemController.cleanupLogs);
   fastify.get('/logs/files', SystemController.getLogFiles);
+  fastify.post(
+    '/logs/clear',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['file'],
+          properties: {
+            file: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    SystemController.clearLogFile
+  );
   fastify.get(
     '/logs/view',
     {
