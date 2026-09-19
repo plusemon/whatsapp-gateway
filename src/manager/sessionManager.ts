@@ -10,7 +10,8 @@ import makeWASocket, {
   WASocket,
 } from '@whiskeysockets/baileys';
 import { clearRedisSession, useRedisAuthState } from '../auth/redisAuthState.js';
-import { config, getPublicBaseUrl, getRedisClient, logger } from '../config.js';
+import { config, getPublicBaseUrl, getRedisClient } from '../config.js';
+import { createSessionLogger, logger } from '../utils/logger.js';
 import { getWhatsAppVersion } from '../utils/versionGuard.js';
 import type {
   InboundMediaMetadata,
@@ -39,7 +40,7 @@ export interface RecentEvent {
 /**
  * Multi-Tenant Session Manager for Botla WhatsApp Gateway.
  * Manages the lifecycle of Baileys WASocket instances, Redis persistence,
- * QR code streaming, anti-ban outbound rate limiting, and webhook dispatches.
+ * QR code streaming, anti-ban outbound rate limiting, structured logging, and webhook dispatches.
  */
 export class SessionManager {
   private activeSockets: Map<string, WASocket> = new Map();
@@ -81,6 +82,8 @@ export class SessionManager {
    * Connects to Redis for persistent authentication state and subscribes to lifecycle events.
    */
   public async initSession(sessionId: string): Promise<SessionMetadata> {
+    const sessionLog = createSessionLogger(sessionId);
+
     // Clear any terminating flag if re-initializing this session
     this.terminatingSessions.delete(sessionId);
 
@@ -89,7 +92,7 @@ export class SessionManager {
 
     // If session is already connected or actively connecting, return its state
     if (existingSocket && existingMeta && (existingMeta.status === 'connected' || existingMeta.status === 'connecting')) {
-      logger.info({ sessionId, status: existingMeta.status }, '[SessionManager] Session already initialized');
+      sessionLog.info({ status: existingMeta.status }, '[SessionManager] Session already initialized or connecting');
       return existingMeta;
     }
 
@@ -118,6 +121,7 @@ export class SessionManager {
     };
     this.metadataMap.set(sessionId, meta);
     this.logEvent('session_event', sessionId, { action: 'init_started' });
+    sessionLog.info({ reconnectAttempts: meta.reconnectAttempts }, '[SessionManager] Initializing WhatsApp session socket...');
 
     try {
       // Step A: Initialize Custom Redis Auth State & Resolve WhatsApp Web Protocol Version
@@ -146,9 +150,9 @@ export class SessionManager {
       sock.ev.on('creds.update', async () => {
         try {
           await saveCreds();
-          logger.debug({ sessionId }, '[SessionManager] Credentials persisted to Redis');
+          sessionLog.debug('[SessionManager] Credentials successfully updated & persisted to Redis');
         } catch (err: any) {
-          logger.error({ sessionId, err: err.message }, '[SessionManager] Failed to save creds to Redis');
+          sessionLog.error({ err: err.message, stack: err.stack }, '[SessionManager] Failed to save creds to Redis');
         }
       });
 
@@ -156,8 +160,7 @@ export class SessionManager {
       sock.ev.on('connection.update', async (update) => {
         // If session is marked for intentional termination/purge, suppress all updates and reconnect loops
         if (this.terminatingSessions.has(sessionId)) {
-          logger.info(
-            { sessionId },
+          sessionLog.info(
             '[SessionManager] Connection update received during intentional purge; ignoring and bypassing reconnect.'
           );
           this.activeSockets.delete(sessionId);
@@ -173,13 +176,13 @@ export class SessionManager {
           meta.qr = qr;
           meta.qrUpdatedAt = Date.now();
           meta.status = 'qr_ready';
-          logger.info({ sessionId }, '[SessionManager] New QR Code generated for session');
+          sessionLog.info('[SessionManager] New WhatsApp QR Code generated and ready for scan');
 
           // Cache QR in Redis with 60-second TTL
           try {
             await redis.set(`wa:session:${sessionId}:qr`, qr, 'EX', 60);
           } catch (err: any) {
-            logger.warn({ sessionId, err: err.message }, '[Redis] Failed to cache QR string in Redis');
+            sessionLog.warn({ err: err.message }, '[Redis] Failed to cache QR string in Redis');
           }
 
           this.logEvent('session_event', sessionId, { action: 'qr_generated' });
@@ -206,8 +209,8 @@ export class SessionManager {
             // Ignore
           }
 
-          logger.info(
-            { sessionId, user: meta.user },
+          sessionLog.info(
+            { user: meta.user, socketId: sock.user?.id },
             '[SessionManager] WhatsApp connection successfully established (open)'
           );
           this.logEvent('session_event', sessionId, {
@@ -218,13 +221,51 @@ export class SessionManager {
 
         // 3. Connection closed / disconnected
         if (connection === 'close') {
-          const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-          const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-          const errorMessage = lastDisconnect?.error?.message || '';
+          const disconnectError = lastDisconnect?.error as any;
+          const boomError = disconnectError as Boom;
+          const statusCode = boomError?.output?.statusCode || disconnectError?.status || disconnectError?.statusCode;
+          const errorMessage = disconnectError?.message || 'Connection closed';
+          const errorStack = disconnectError?.stack || undefined;
+
+          // Categorize status code context for clear operational observability
+          let category = 'Unknown Disconnection';
+          if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+            category = 'Logged Out / Credentials Dead (401)';
+          } else if (statusCode === DisconnectReason.timedOut || statusCode === 408) {
+            category = 'Connection Timed Out / Socket Dead (408)';
+          } else if (statusCode === DisconnectReason.restartRequired || statusCode === 515) {
+            category = 'Stream Restart Required (515)';
+          } else if (statusCode === DisconnectReason.connectionClosed || statusCode === 428) {
+            category = 'Connection Closed by Host (428)';
+          } else if (statusCode === DisconnectReason.connectionLost) {
+            category = 'Connection Lost (408)';
+          } else if (statusCode === DisconnectReason.badSession || statusCode === 500) {
+            category = 'Bad Session Credentials (500)';
+          } else if (statusCode === DisconnectReason.unavailableService || statusCode === 503) {
+            category = 'WhatsApp Service Unavailable (503)';
+          } else if (statusCode === DisconnectReason.multideviceMismatch || statusCode === 411) {
+            category = 'Multi-Device Protocol Mismatch (411)';
+          }
+
+          const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401;
+          const isRestartRequired = statusCode === DisconnectReason.restartRequired || statusCode === 515;
           const isQrExpired =
             errorMessage.includes('QR refs attempts ended') ||
             (!meta.user && (statusCode === DisconnectReason.timedOut || statusCode === 408) && (meta.status === 'qr_ready' || meta.status === 'connecting'));
-          const isRestartRequired = statusCode === DisconnectReason.restartRequired;
+
+          sessionLog.warn(
+            {
+              statusCode,
+              category,
+              error: errorMessage,
+              stack: errorStack,
+              isLoggedOut,
+              isRestartRequired,
+              isQrExpired,
+              reconnectAttempts: meta.reconnectAttempts,
+            },
+            `[SessionManager] Socket close event: ${category} (HTTP ${statusCode || 'unknown'})`
+          );
 
           // QR code references timed out without being scanned
           if (isQrExpired) {
@@ -240,9 +281,9 @@ export class SessionManager {
               // Ignore
             }
 
-            logger.info(
-              { sessionId, statusCode },
-              '[SessionManager] QR code pairing expired (no scan received before timeout). Ready for re-init.'
+            sessionLog.info(
+              { statusCode },
+              '[SessionManager] QR code pairing window expired (no scan detected before timeout). Awaiting new init.'
             );
 
             this.logEvent('session_event', sessionId, {
@@ -251,11 +292,6 @@ export class SessionManager {
             });
             return;
           }
-
-          logger.warn(
-            { sessionId, statusCode, isLoggedOut, error: errorMessage },
-            '[SessionManager] WhatsApp connection closed'
-          );
 
           // DisconnectReason.loggedOut (401): clean up socket and purge keys from Redis
           if (isLoggedOut) {
@@ -267,9 +303,9 @@ export class SessionManager {
 
             try {
               const purgedCount = await clearRedisSession(redis, sessionId);
-              logger.info({ sessionId, purgedCount }, '[SessionManager] Purged logged out session keys from Redis');
+              sessionLog.info({ purgedCount }, '[SessionManager] Cleaned up and purged logged-out session keys from Redis');
             } catch (purgeErr: any) {
-              logger.error({ sessionId, err: purgeErr.message }, '[SessionManager] Error purging Redis session');
+              sessionLog.error({ err: purgeErr.message, stack: purgeErr.stack }, '[SessionManager] Error purging Redis session');
             }
 
             this.logEvent('session_event', sessionId, {
@@ -277,12 +313,12 @@ export class SessionManager {
               statusCode,
             });
           } else if (isRestartRequired) {
-            // Immediate restart required by Baileys internal state sync
-            logger.info({ sessionId }, '[SessionManager] Restart required by Baileys, reconnecting immediately');
+            // Immediate restart required by Baileys internal state sync (515)
+            sessionLog.info('[SessionManager] Stream restart required by Baileys protocol (515), executing immediate reconnection');
             this.activeSockets.delete(sessionId);
             setTimeout(() => {
               this.initSession(sessionId).catch((reconnErr) => {
-                logger.error({ sessionId, err: reconnErr.message }, '[SessionManager] Restart reconnection failed');
+                sessionLog.error({ err: reconnErr.message, stack: reconnErr.stack }, '[SessionManager] Stream restart reconnection failed');
               });
             }, 500);
           } else {
@@ -294,24 +330,28 @@ export class SessionManager {
             this.logEvent('session_event', sessionId, {
               action: 'disconnected',
               statusCode,
+              category,
             });
 
             // Reconnection guardrail with exponential delay (up to 5 attempts)
             if (meta.reconnectAttempts < 5) {
               meta.reconnectAttempts++;
               const delay = Math.min(meta.reconnectAttempts * 1500, 6000);
-              logger.info(
-                { sessionId, attempt: meta.reconnectAttempts, delayMs: delay },
-                '[SessionManager] Scheduling auto-reconnection'
+              sessionLog.info(
+                { attempt: meta.reconnectAttempts, maxAttempts: 5, delayMs: delay },
+                `[SessionManager] Scheduling auto-reconnection attempt ${meta.reconnectAttempts}/5 in ${delay}ms`
               );
 
               setTimeout(() => {
                 this.initSession(sessionId).catch((reconnErr) => {
-                  logger.error({ sessionId, err: reconnErr.message }, '[SessionManager] Auto-reconnection failed');
+                  sessionLog.error({ err: reconnErr.message, stack: reconnErr.stack }, '[SessionManager] Auto-reconnection attempt failed');
                 });
               }, delay);
             } else {
-              logger.error({ sessionId }, '[SessionManager] Exceeded maximum auto-reconnect attempts');
+              sessionLog.error(
+                { reconnectAttempts: meta.reconnectAttempts },
+                '[SessionManager] Exceeded maximum auto-reconnect attempts (5). Session remains disconnected until manual init.'
+              );
             }
           }
         }
@@ -372,21 +412,20 @@ export class SessionManager {
                   filename: mediaInfo.filename || fileNameOnDisk,
                 };
 
-                logger.info(
+                sessionLog.info(
                   {
-                    sessionId,
                     messageId,
                     type: mediaInfo.type,
                     fileSize: buffer.length,
                     url: mediaAccessUrl,
                   },
-                  '[SessionManager] Inbound media extracted, stored and URL generated'
+                  '[InboundMedia] Extracted, buffered to disk and access URL formed'
                 );
               }
             } catch (mediaErr: any) {
-              logger.error(
-                { sessionId, err: mediaErr.message, type: mediaInfo.type },
-                '[SessionManager] Failed to download inbound media attachment'
+              sessionLog.error(
+                { err: mediaErr.message, stack: mediaErr.stack, type: mediaInfo.type },
+                '[InboundMedia] Failed to download inbound media attachment'
               );
             }
           }
@@ -401,6 +440,17 @@ export class SessionManager {
               media: inboundMedia,
             },
           };
+
+          sessionLog.info(
+            {
+              from: msg.key.remoteJid,
+              pushName: msg.pushName,
+              hasMedia: !!inboundMedia,
+              mediaType: inboundMedia?.type,
+              textPreview: extractedText ? extractedText.slice(0, 70) : undefined,
+            },
+            '[InboundMessage] WhatsApp message received, preparing webhook relay'
+          );
 
           this.logEvent('inbound_message', sessionId, {
             from: msg.key.remoteJid,
@@ -418,7 +468,7 @@ export class SessionManager {
 
           // Post asynchronously to configured Laravel webhook
           this.dispatchWebhook(payload).catch((webhookErr) => {
-            logger.error({ sessionId, err: webhookErr.message }, '[SessionManager] Webhook delivery failed');
+            sessionLog.error({ err: webhookErr.message, stack: webhookErr.stack }, '[InboundMessage] Webhook relay failed');
           });
         }
       });
@@ -449,16 +499,16 @@ export class SessionManager {
 
             const statusLabel = this.getAckStatusLabel(status);
 
-            logger.info(
+            sessionLog.info(
               {
-                sessionId,
                 messageId,
                 remoteJid,
                 status,
                 statusLabel,
                 fromMe: item.key?.fromMe,
+                step: 'ack_received',
               },
-              '[SessionManager] Received message status update (ACK)'
+              `[OutboundLifecycle] Message delivery ACK: ${statusLabel} (code: ${status})`
             );
 
             this.logEvent('message_ack', sessionId, {
@@ -471,9 +521,9 @@ export class SessionManager {
 
             // Dispatch ACK asynchronously to Botla Core webhook
             this.dispatchWebhook(ackPayload).catch((webhookErr) => {
-              logger.error(
-                { sessionId, messageId, status, err: webhookErr.message },
-                '[SessionManager] Failed to dispatch ACK update to webhook'
+              sessionLog.error(
+                { messageId, status, err: webhookErr.message, stack: webhookErr.stack },
+                '[OutboundLifecycle] Failed to dispatch ACK update to webhook'
               );
             });
           }
@@ -483,7 +533,7 @@ export class SessionManager {
       return meta;
     } catch (err: any) {
       meta.status = 'disconnected';
-      logger.error({ sessionId, err: err.message }, '[SessionManager] Failed to initialize session');
+      sessionLog.error({ err: err.message, stack: err.stack }, '[SessionManager] Failed to initialize session');
       throw err;
     }
   }
@@ -642,8 +692,10 @@ export class SessionManager {
    */
   public async dispatchWebhook(payload: WebhookPayload | Record<string, any>): Promise<void> {
     const webhookUrl = config.botlaWebhookUrl;
+    const sessionLog = payload.sessionId ? createSessionLogger(payload.sessionId) : logger;
+
     if (!webhookUrl) {
-      logger.warn('[Webhook] No BOTLA_WEBHOOK_URL configured; skipping dispatch');
+      sessionLog.warn('[Webhook] No BOTLA_WEBHOOK_URL configured; skipping dispatch');
       return;
     }
 
@@ -675,14 +727,13 @@ export class SessionManager {
         throw new Error(`Webhook returned HTTP ${response.status}: ${response.statusText}`);
       }
 
-      logger.info(
+      sessionLog.info(
         {
-          sessionId: payload.sessionId,
           event: eventName,
           url: webhookUrl,
           status: response.status,
         },
-        '[Webhook] Dispatched payload to Laravel webhook'
+        '[Webhook] Payload successfully delivered to Laravel webhook'
       );
       this.logEvent('webhook_dispatched', payload.sessionId, {
         url: webhookUrl,
@@ -690,12 +741,12 @@ export class SessionManager {
         statusCode: response.status,
       });
     } catch (err: any) {
-      logger.error(
+      sessionLog.error(
         {
-          sessionId: payload.sessionId,
           event: eventName,
           url: webhookUrl,
           error: err.message,
+          stack: err.stack,
         },
         '[Webhook] Failed to deliver payload to webhook'
       );
@@ -709,16 +760,19 @@ export class SessionManager {
 
   /**
    * Sends an outbound text message with anti-ban composing simulation and randomized delay.
+   * Lifecycle logging: Enqueued -> Presence sent -> Dispatched.
    */
   public async sendMessage(
     sessionId: string,
     jid: string,
     text: string
   ): Promise<{ messageId: string; timestamp: number }> {
+    const sessionLog = createSessionLogger(sessionId);
     const sock = this.activeSockets.get(sessionId);
     const meta = this.metadataMap.get(sessionId);
 
     if (!sock || meta?.status !== 'connected') {
+      sessionLog.warn({ status: meta?.status }, '[OutboundLifecycle] Dispatch rejected: Session is not connected');
       throw new Error(`Session '${sessionId}' is not active or connected to WhatsApp`);
     }
 
@@ -728,24 +782,33 @@ export class SessionManager {
       targetJid = `${targetJid}@s.whatsapp.net`;
     }
 
-    // Anti-ban guardrail requirement:
-    // 1. Trigger presence 'composing'
-    await sock.sendPresenceUpdate('composing', targetJid);
+    // Step 1: Log Enqueued
+    sessionLog.info(
+      { jid: targetJid, textPreview: text.slice(0, 80), step: 'enqueued' },
+      '[OutboundLifecycle] Outbound text message enqueued for dispatch'
+    );
 
-    // 2. Randomized delay (600ms - 1400ms)
+    // Step 2: Anti-ban guardrail - send typing presence
+    await sock.sendPresenceUpdate('composing', targetJid);
     const delay = Math.floor(Math.random() * (1400 - 600 + 1)) + 600;
+
+    sessionLog.info(
+      { jid: targetJid, presence: 'composing', delayMs: delay, step: 'presence_sent' },
+      `[OutboundLifecycle] Simulating typing presence (throttling for ${delay}ms)...`
+    );
+
     await new Promise((resolve) => setTimeout(resolve, delay));
 
-    // 3. Clear presence 'paused'
+    // Step 3: Clear presence 'paused'
     await sock.sendPresenceUpdate('paused', targetJid);
 
-    // 4. Send message
+    // Step 4: Dispatch message via Baileys socket
     const sendResult = await sock.sendMessage(targetJid, { text });
     const messageId = sendResult?.key?.id || crypto.randomUUID();
 
-    logger.info(
-      { sessionId, jid: targetJid, messageId, delayMs: delay },
-      '[SessionManager] Message dispatched successfully'
+    sessionLog.info(
+      { jid: targetJid, messageId, delayMs: delay, step: 'dispatched' },
+      '[OutboundLifecycle] Outbound text message successfully dispatched to WhatsApp socket'
     );
 
     this.logEvent('outbound_message', sessionId, {
@@ -849,13 +912,14 @@ export class SessionManager {
       );
 
       for (const sessionId of sessionIds) {
+        const sessionLog = createSessionLogger(sessionId);
         try {
-          logger.info({ sessionId }, '[SessionManager] Auto-restoring session...');
+          sessionLog.info('[SessionManager] Auto-restoring session from persistent Redis credentials...');
           await this.initSession(sessionId);
-          logger.info({ sessionId }, '[SessionManager] Successfully auto-restored session');
+          sessionLog.info('[SessionManager] Successfully auto-restored session from Redis');
         } catch (sessionErr: any) {
-          logger.error(
-            { sessionId, err: sessionErr.message },
+          sessionLog.error(
+            { err: sessionErr.message, stack: sessionErr.stack },
             '[SessionManager] Failed to auto-restore session; skipping to next'
           );
         }
@@ -863,7 +927,7 @@ export class SessionManager {
 
       logger.info('[SessionManager] Session auto-restore sequence finished.');
     } catch (err: any) {
-      logger.error({ err: err.message }, '[SessionManager] Error executing restoreAllSessions');
+      logger.error({ err: err.message, stack: err.stack }, '[SessionManager] Error executing restoreAllSessions');
     }
   }
 
@@ -872,6 +936,7 @@ export class SessionManager {
    * Formats the pairing code with hyphen (e.g., ABCD-1234).
    */
   public async requestPairingCode(sessionId: string, phoneNumber: string): Promise<string> {
+    const sessionLog = createSessionLogger(sessionId);
     let sock = this.activeSockets.get(sessionId);
     let meta = this.metadataMap.get(sessionId);
 
@@ -882,24 +947,32 @@ export class SessionManager {
     }
 
     if (!sock) {
+      sessionLog.error({ phoneNumber }, '[PairingCode] Failed to initialize socket for pairing');
       throw new Error(`Failed to initialize session '${sessionId}' for pairing code`);
     }
 
     // Clean and validate phone number (digits only)
     const cleanPhone = phoneNumber.replace(/\D/g, '');
     if (!cleanPhone || cleanPhone.length < 8) {
+      sessionLog.warn({ rawPhone: phoneNumber, cleanPhone }, '[PairingCode] Invalid phone number provided');
       throw new Error('Invalid phone number. Must include country code and digits (e.g. 88017xxxxxxxx).');
     }
 
     // Verify session is not already registered
     if (sock.authState?.creds?.registered) {
+      sessionLog.warn('[PairingCode] Pairing request rejected: session is already registered and authenticated');
       throw new Error(`Session '${sessionId}' is already registered and authenticated.`);
     }
 
-    logger.info({ sessionId, phoneNumber: cleanPhone }, '[SessionManager] Requesting pairing code from WhatsApp...');
+    sessionLog.info(
+      { phoneNumber: cleanPhone, step: 'request_sent', timestamp: new Date().toISOString() },
+      '[PairingCode] Requesting 8-character pairing code from WhatsApp socket...'
+    );
+
     const rawCode = await sock.requestPairingCode(cleanPhone);
 
     if (!rawCode) {
+      sessionLog.error({ phoneNumber: cleanPhone }, '[PairingCode] WhatsApp socket returned empty pairing code');
       throw new Error('WhatsApp did not return a pairing code. Please retry.');
     }
 
@@ -909,7 +982,15 @@ export class SessionManager {
       ? `${cleanCode.slice(0, 4)}-${cleanCode.slice(4)}`
       : (rawCode.includes('-') ? rawCode : (rawCode.match(/.{1,4}/g)?.join('-') || rawCode));
 
-    logger.info({ sessionId, code: formattedCode }, '[SessionManager] Pairing code generated successfully');
+    sessionLog.info(
+      {
+        phoneNumber: cleanPhone,
+        code: formattedCode,
+        step: 'code_generated',
+        timestamp: new Date().toISOString(),
+      },
+      '[PairingCode] 8-character pairing code generated successfully. Enter on phone.'
+    );
 
     this.logEvent('session_event', sessionId, {
       action: 'pairing_code_generated',
@@ -934,10 +1015,12 @@ export class SessionManager {
       ptt?: boolean;
     }
   ): Promise<{ messageId: string; timestamp: number }> {
+    const sessionLog = createSessionLogger(sessionId);
     const sock = this.activeSockets.get(sessionId);
     const meta = this.metadataMap.get(sessionId);
 
     if (!sock || meta?.status !== 'connected') {
+      sessionLog.warn({ type, jid, status: meta?.status }, '[OutboundMedia] Dispatch rejected: session is not connected');
       throw new Error(`Session '${sessionId}' is not active or connected to WhatsApp`);
     }
 
@@ -947,13 +1030,28 @@ export class SessionManager {
       targetJid = `${targetJid}@s.whatsapp.net`;
     }
 
+    sessionLog.info(
+      {
+        jid: targetJid,
+        type,
+        url,
+        ptt: options?.ptt,
+        step: 'enqueued',
+      },
+      `[OutboundMedia] Media message (${type}) enqueued for dispatch`
+    );
+
     // Anti-ban simulation: composing or recording presence
     const presenceType = type === 'audio' && options?.ptt ? 'recording' : 'composing';
     await sock.sendPresenceUpdate(presenceType, targetJid);
 
     const delay = Math.floor(Math.random() * (1400 - 600 + 1)) + 600;
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    sessionLog.info(
+      { jid: targetJid, presence: presenceType, delayMs: delay, step: 'presence_sent' },
+      `[OutboundMedia] Simulated ${presenceType} presence sent, throttling ${delay}ms...`
+    );
 
+    await new Promise((resolve) => setTimeout(resolve, delay));
     await sock.sendPresenceUpdate('paused', targetJid);
 
     // Build media payload for Baileys
@@ -984,9 +1082,9 @@ export class SessionManager {
       sendResult = await sock.sendMessage(targetJid, messagePayload);
     } catch (directErr: any) {
       // Fallback: fetch media buffer directly and dispatch with Buffer
-      logger.warn(
-        { sessionId, type, url, err: directErr.message },
-        '[SessionManager] Direct URL dispatch failed; fetching media buffer as fallback'
+      sessionLog.warn(
+        { type, url, err: directErr.message },
+        '[OutboundMedia] Direct URL dispatch failed; fetching media buffer as fallback'
       );
       const fetchRes = await fetch(url, { signal: AbortSignal.timeout(20000) });
       if (!fetchRes.ok) {
@@ -1006,9 +1104,9 @@ export class SessionManager {
 
     const messageId = sendResult?.key?.id || crypto.randomUUID();
 
-    logger.info(
-      { sessionId, jid: targetJid, type, messageId, delayMs: delay },
-      '[SessionManager] Outbound media dispatched successfully'
+    sessionLog.info(
+      { jid: targetJid, type, messageId, delayMs: delay, step: 'dispatched' },
+      `[OutboundMedia] Media (${type}) dispatched successfully to WhatsApp socket`
     );
 
     this.logEvent('outbound_message', sessionId, {
@@ -1036,10 +1134,12 @@ export class SessionManager {
     logger.info({ count }, '[SessionManager] Gracefully closing all active WASockets without purging Redis keys...');
 
     for (const [sessionId, sock] of this.activeSockets.entries()) {
+      const sessionLog = createSessionLogger(sessionId);
       try {
         sock.end(undefined);
+        sessionLog.info('[SessionManager] Active socket ended gracefully');
       } catch (err: any) {
-        logger.warn({ sessionId, err: err.message }, '[SessionManager] Warning while closing socket');
+        sessionLog.warn({ err: err.message }, '[SessionManager] Warning while closing socket');
       }
     }
 
@@ -1052,6 +1152,8 @@ export class SessionManager {
    * Ensures intentional termination flag blocks any automated reconnect race conditions.
    */
   public async deleteSession(sessionId: string): Promise<void> {
+    const sessionLog = createSessionLogger(sessionId);
+
     // Step 1: Add sessionId to terminatingSessions
     this.terminatingSessions.add(sessionId);
 
@@ -1068,7 +1170,7 @@ export class SessionManager {
         }
         sock.end(undefined);
       } catch (err: any) {
-        logger.warn({ sessionId, err: err.message }, '[SessionManager] Socket end warning during purge');
+        sessionLog.warn({ err: err.message }, '[SessionManager] Socket end warning during purge');
       }
     }
 
@@ -1079,19 +1181,19 @@ export class SessionManager {
       try {
         keys = await redis.keys(`wa:session:${sessionId}:*`);
       } catch (keyErr: any) {
-        logger.warn({ sessionId, err: keyErr.message }, '[SessionManager] Failed to query Redis keys during purge');
+        sessionLog.warn({ err: keyErr.message }, '[SessionManager] Failed to query Redis keys during purge');
       }
 
       if (keys && keys.length > 0) {
         await redis.del(...keys);
-        logger.info({ sessionId, count: keys.length }, '[SessionManager] Deleted Redis session keys via pattern');
+        sessionLog.info({ count: keys.length }, '[SessionManager] Deleted Redis session keys via pattern');
       }
 
       // Extra safety: run clearRedisSession
       await clearRedisSession(redis, sessionId);
-      logger.info({ sessionId }, '[SessionManager] Tenant session purged from Redis and memory');
+      sessionLog.info('[SessionManager] Tenant session permanently purged from Redis and memory');
     } catch (err: any) {
-      logger.error({ sessionId, err: err.message }, '[SessionManager] Error clearing Redis on session delete');
+      sessionLog.error({ err: err.message, stack: err.stack }, '[SessionManager] Error clearing Redis on session delete');
     }
 
     // Step 5: After a short timeout, delete sessionId from terminatingSessions
@@ -1112,3 +1214,4 @@ export class SessionManager {
 
 // Export singleton instance for the microservice
 export const sessionManager = new SessionManager();
+

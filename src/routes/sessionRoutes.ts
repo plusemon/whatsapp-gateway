@@ -1,8 +1,11 @@
+import fs from 'fs';
+import path from 'path';
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import QRCode from 'qrcode';
 import { getRedisClient } from '../config.js';
 import { sessionManager } from '../manager/sessionManager.js';
-import { cleanMediaStorage } from '../utils/cleanup.js';
+import { cleanLogStorage, cleanMediaStorage, formatBytes } from '../utils/cleanup.js';
+import { getRecentLogs, subscribeLogStream } from '../utils/logger.js';
 import { getCachedWhatsAppVersion, getWhatsAppVersion } from '../utils/versionGuard.js';
 import type {
   ApiDeleteResponse,
@@ -11,11 +14,13 @@ import type {
   ApiQrResponse,
   ApiSendMediaResponse,
   ApiSendResponse,
+  LogCleanupResult,
   MediaCleanupResult,
   PairCodeBody,
   SendMediaBody,
   SendMessageBody,
   SessionParams,
+  StreamLogEvent,
 } from '../types/index.js';
 
 /**
@@ -568,6 +573,179 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
         source: 'fallback',
         fetchedAt: new Date().toISOString(),
       });
+    }
+  });
+
+  /**
+   * Real-Time Server-Sent Events (SSE) Log Stream
+   * GET /api/logs/stream
+   *
+   * Streams structured logs, errors, disconnections, and outbound lifecycle in real-time.
+   */
+  fastify.get('/logs/stream', async (request, reply) => {
+    // Hijack the raw Node.js HTTP response for low-latency SSE streaming
+    const rawRes = reply.raw;
+
+    rawRes.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'Access-Control-Allow-Origin': '*',
+    });
+
+    // Send connected handshake message
+    rawRes.write(
+      `data: ${JSON.stringify({
+        id: 'conn-' + Date.now(),
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: '⚡ Real-time Gateway Log Stream connected',
+        meta: { transport: 'SSE', pid: process.pid },
+      })}\n\n`
+    );
+
+    // Hydrate initial recent log history (up to 40 items)
+    const history = getRecentLogs(40).reverse();
+    for (const logItem of history) {
+      rawRes.write(`data: ${JSON.stringify(logItem)}\n\n`);
+    }
+
+    // Subscribe to live log emissions
+    const unsubscribe = subscribeLogStream((logEvent: StreamLogEvent) => {
+      try {
+        rawRes.write(`data: ${JSON.stringify(logEvent)}\n\n`);
+      } catch {
+        // Stream may have closed
+      }
+    });
+
+    // Keep-alive heartbeat interval every 15 seconds
+    const heartbeatTimer = setInterval(() => {
+      try {
+        rawRes.write(': heartbeat\n\n');
+      } catch {
+        clearInterval(heartbeatTimer);
+      }
+    }, 15000);
+
+    // Clean up on client disconnect
+    request.raw.on('close', () => {
+      unsubscribe();
+      clearInterval(heartbeatTimer);
+    });
+
+    // Fastify needs to know not to send its standard response
+    reply.hijack();
+  });
+
+  /**
+   * Query Recent Logs via REST
+   * GET /api/logs
+   */
+  fastify.get<{
+    Querystring: {
+      limit?: number;
+      level?: string;
+      sessionId?: string;
+    };
+  }>('/logs', async (request, reply) => {
+    const limit = Math.min(request.query.limit ? Number(request.query.limit) : 100, 250);
+    const targetLevel = request.query.level?.toLowerCase();
+    const targetSession = request.query.sessionId?.trim();
+
+    let logs = getRecentLogs(limit);
+
+    if (targetLevel) {
+      logs = logs.filter((l) => l.level.toLowerCase() === targetLevel);
+    }
+    if (targetSession) {
+      logs = logs.filter((l) => l.sessionId === targetSession);
+    }
+
+    return reply.status(200).send({
+      count: logs.length,
+      logs,
+    });
+  });
+
+  /**
+   * Trigger Manual or Administrative Log Storage Retention Cleanup
+   * POST /api/logs/cleanup
+   */
+  fastify.post<{
+    Body: { retentionDays?: number };
+    Reply: LogCleanupResult;
+  }>('/logs/cleanup', async (request, reply) => {
+    try {
+      const retentionDays = request.body?.retentionDays;
+      const result = await cleanLogStorage(retentionDays);
+      return reply.status(200).send(result);
+    } catch (err: any) {
+      request.log.error({ err: err.message }, 'Failed to execute log storage retention cleanup');
+      return reply.status(500).send({
+        success: false,
+        deletedFilesCount: 0,
+        freedBytes: 0,
+        freedBytesFormatted: '0 B',
+        retentionDays: 14,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
+  /**
+   * Inspect Log Files on Disk
+   * GET /api/logs/files
+   */
+  fastify.get('/logs/files', async (request, reply) => {
+    try {
+      const logsDir = path.resolve(process.cwd(), 'storage/logs');
+      if (!fs.existsSync(logsDir)) {
+        return reply.status(200).send({ files: [], totalSizeBytes: 0, totalSizeFormatted: '0 B' });
+      }
+
+      const fileNames = await fs.promises.readdir(logsDir);
+      let totalBytes = 0;
+      const filesInfo = [];
+
+      for (const name of fileNames) {
+        const filePath = path.join(logsDir, name);
+        try {
+          const stat = await fs.promises.stat(filePath);
+          if (stat.isFile()) {
+            totalBytes += stat.size;
+            filesInfo.push({
+              name,
+              sizeBytes: stat.size,
+              sizeFormatted: formatBytes(stat.size),
+              modifiedAt: new Date(stat.mtimeMs).toISOString(),
+              ageDays: Math.floor((Date.now() - stat.mtimeMs) / (1000 * 60 * 60 * 24)),
+            });
+          }
+        } catch {
+          // Ignore file stat failure
+        }
+      }
+
+      // Sort with combined.log and error.log first, then newest
+      filesInfo.sort((a, b) => {
+        if (a.name === 'combined.log') return -1;
+        if (b.name === 'combined.log') return 1;
+        if (a.name === 'error.log') return -1;
+        if (b.name === 'error.log') return 1;
+        return b.name.localeCompare(a.name);
+      });
+
+      return reply.status(200).send({
+        files: filesInfo,
+        totalSizeBytes: totalBytes,
+        totalSizeFormatted: formatBytes(totalBytes),
+        directory: 'storage/logs',
+      });
+    } catch (err: any) {
+      request.log.error({ err: err.message }, 'Failed to inspect log directory');
+      return reply.status(500).send({ error: err.message });
     }
   });
 };

@@ -61,6 +61,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       isLatestProtocol: cachedVersion ? cachedVersion.isLatest : true,
       mediaRetentionHours: config.mediaRetentionHours,
       mediaCleanupIntervalHours: config.mediaCleanupIntervalHours,
+      logRetentionDays: config.logRetentionDays,
     };
   });
 

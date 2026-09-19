@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import net from 'net';
 import Redis from 'ioredis';
 import RedisMock from 'ioredis-mock';
-import pino from 'pino';
+import { createSessionLogger, logger } from './utils/logger.js';
 
 // Load environment variables from .env
 dotenv.config();
@@ -15,6 +15,7 @@ export interface GatewayConfig {
   botlaWebhookUrl: string;
   webhookSecret: string;
   logLevel: string;
+  logRetentionDays: number;
   mediaRetentionHours: number;
   mediaCleanupIntervalHours: number;
 }
@@ -27,6 +28,7 @@ export const config: GatewayConfig = {
   botlaWebhookUrl: process.env.BOTLA_WEBHOOK_URL || 'http://127.0.0.1:8000/api/whatsapp/webhook',
   webhookSecret: process.env.WEBHOOK_SECRET || 'your_hmac_secret_here',
   logLevel: process.env.LOG_LEVEL || 'info',
+  logRetentionDays: parseInt(process.env.LOG_RETENTION_DAYS || '14', 10),
   mediaRetentionHours: parseInt(process.env.MEDIA_RETENTION_HOURS || '48', 10),
   mediaCleanupIntervalHours: parseInt(process.env.MEDIA_CLEANUP_INTERVAL_HOURS || '6', 10),
 };
@@ -42,10 +44,8 @@ export function getPublicBaseUrl(): string {
   return `http://${host}:${config.port}`;
 }
 
-export const logger = pino({
-  level: config.logLevel,
-  timestamp: pino.stdTimeFunctions.isoTime,
-});
+export { createSessionLogger, logger };
+
 
 let redisInstance: Redis | null = null;
 let isMockRedis = false;

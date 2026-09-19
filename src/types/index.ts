@@ -184,3 +184,28 @@ export interface ApiDeleteResponse {
   sessionId: string;
   message: string;
 }
+
+/**
+ * Real-time structured log event streamed to clients and stored in log files.
+ */
+export interface StreamLogEvent {
+  id: string;
+  timestamp: string;
+  level: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+  sessionId?: string;
+  message: string;
+  meta?: Record<string, any>;
+}
+
+/**
+ * Result of log file retention pruning.
+ */
+export interface LogCleanupResult {
+  success: boolean;
+  deletedFilesCount: number;
+  freedBytes: number;
+  freedBytesFormatted: string;
+  retentionDays: number;
+  timestamp: string;
+}
+
