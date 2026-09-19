@@ -6,6 +6,7 @@
 import crypto from 'crypto';
 import { config } from '../config/env.js';
 import { getRedisClient } from '../config/redis.js';
+import { DbService } from './db.service.js';
 import { createSessionLogger, logger } from '../utils/logger.js';
 import type { WebhookPayload } from '../types/message.types.js';
 
@@ -330,6 +331,18 @@ export class WebhookService {
 
         await this.updateStats(sessionId, true);
 
+        // Audit delivery log in relational DB
+        if (sessionId) {
+          DbService.createWebhookLog({
+            sessionId,
+            event: eventName,
+            payload,
+            statusCode: response.status,
+            attempts: attempt + 1,
+            success: true,
+          }).catch(() => {});
+        }
+
         if (onDispatched) {
           onDispatched('dispatched', {
             url: active.url,
@@ -363,6 +376,19 @@ export class WebhookService {
         );
 
         await this.updateStats(sessionId, false, err.message);
+
+        // Audit delivery failure in relational DB
+        if (sessionId) {
+          DbService.createWebhookLog({
+            sessionId,
+            event: eventName,
+            payload,
+            statusCode: null,
+            attempts: maxRetries + 1,
+            success: false,
+            error: err.message,
+          }).catch(() => {});
+        }
 
         if (onDispatched) {
           onDispatched('failed', {

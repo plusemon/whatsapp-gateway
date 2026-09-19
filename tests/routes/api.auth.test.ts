@@ -14,6 +14,20 @@ describe('Fastify API Auth Middleware (api.auth.test.ts)', () => {
 
     app = Fastify({ logger: false });
 
+    // Handle empty JSON bodies gracefully
+    app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+      if (!body || typeof body !== 'string' || body.trim() === '') {
+        done(null, {});
+        return;
+      }
+      try {
+        done(null, JSON.parse(body));
+      } catch (err: any) {
+        err.statusCode = 400;
+        done(err, undefined);
+      }
+    });
+
     // Register routes under /api prefix exactly as in server.ts
     await app.register(apiRoutes, { prefix: '/api' });
 
@@ -134,6 +148,20 @@ describe('Fastify API Auth Middleware (api.auth.test.ts)', () => {
       expect(response.statusCode).toBe(200);
       const json = response.json();
       expect(json.status).toBe('ok');
+    });
+
+    it('should gracefully handle DELETE requests with content-type application/json and empty body', async () => {
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/v1/sessions/non-existent-session-test',
+        headers: {
+          'x-api-key': TEST_API_KEY,
+          'content-type': 'application/json',
+        },
+      });
+
+      // Should not throw 400 "Body cannot be empty when content-type is set to 'application/json'"
+      expect(response.statusCode).not.toBe(400);
     });
   });
 });

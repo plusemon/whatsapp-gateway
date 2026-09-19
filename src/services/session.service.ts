@@ -19,6 +19,7 @@ import { getWhatsAppVersion } from '../utils/versionGuard.js';
 import { MediaService } from './media.service.js';
 import { MessageService } from './message.service.js';
 import { WebhookService } from './webhook.service.js';
+import { DbService, SessionStatus, MessageDirection, MessageStatus } from './db.service.js';
 import type {
   OutboundMessageResult,
   RecentEvent,
@@ -206,6 +207,16 @@ export class SessionService {
     };
     this.metadataMap.set(sessionId, meta);
     this.logEvent('session_event', sessionId, { action: 'init_started', authMode });
+
+    // Persist or update session in relational DB
+    const initialDbStatus = authMode === 'pairing_code' ? SessionStatus.PAIRING_CODE : SessionStatus.QR_READY;
+    DbService.upsertSession(sessionId, {
+      status: initialDbStatus,
+      authMode,
+      phoneNumber: phoneNumber || null,
+      lastActiveAt: new Date(),
+    }).catch(() => {});
+
     sessionLog.info(
       { reconnectAttempts: meta.reconnectAttempts, authMode, phoneNumber },
       '[SessionService] Initializing WhatsApp session socket...'
@@ -293,6 +304,9 @@ export class SessionService {
 
           this.logEvent('session_event', sessionId, { action: 'qr_generated', qr: update.qr });
           this.emitEvent(sessionId, 'qr_generated', { qr: update.qr });
+
+          // Record QR_READY in DB
+          DbService.updateSessionStatus(sessionId, SessionStatus.QR_READY).catch(() => {});
         }
 
         // 2. Connection opened successfully
@@ -316,6 +330,16 @@ export class SessionService {
           } catch {
             // Ignore
           }
+
+          const connectedPhone = meta.user?.id ? extractPhoneFromJid(meta.user.id) : (currentSession?.phoneNumber || null);
+          const connectedPushName = meta.user?.name || null;
+
+          // Record CONNECTED status in DB
+          DbService.updateSessionStatus(sessionId, SessionStatus.CONNECTED, {
+            phoneNumber: connectedPhone,
+            pushName: connectedPushName,
+            lastActiveAt: new Date(),
+          }).catch(() => {});
 
           sessionLog.info(
             { action: 'session_connected', event: 'session_connected', sessionId, status: 'connected', user: meta.user, socketId: sock.user?.id },
@@ -358,6 +382,11 @@ export class SessionService {
           const statusCode = boomError?.output?.statusCode || disconnectError?.status || disconnectError?.statusCode;
           const errorMessage = disconnectError?.message || 'Connection closed';
           const errorStack = disconnectError?.stack || undefined;
+
+          // Record DISCONNECTED status in DB
+          DbService.updateSessionStatus(sessionId, SessionStatus.DISCONNECTED, {
+            lastActiveAt: new Date(),
+          }).catch(() => {});
 
           const isConflict =
             statusCode === DisconnectReason.connectionReplaced ||
@@ -624,6 +653,22 @@ export class SessionService {
               : undefined,
           });
 
+          // Ingest received message into relational DB
+          const inboundMsgId = msg.key.id || crypto.randomUUID();
+          DbService.createMessage({
+            id: inboundMsgId,
+            sessionId,
+            direction: MessageDirection.INBOUND,
+            remoteJid: msg.key.remoteJid || '',
+            lidJid: (msg.key as any).participant || (msg.key as any).remoteJidAlt || null,
+            text: extractedText || null,
+            hasMedia: !!inboundMedia,
+            mediaType: inboundMedia?.type || null,
+            mediaUrl: inboundMedia?.url || null,
+            status: MessageStatus.SERVER_ACK,
+            statusRaw: 2,
+          }).catch(() => {});
+
           // Post asynchronously to configured Laravel webhook
           WebhookService.dispatch(payload, (evt, details) => {
             this.logEvent(
@@ -679,6 +724,18 @@ export class SessionService {
               statusLabel,
               fromMe: item.key?.fromMe,
             });
+
+            // Map Baileys status code to Prisma MessageStatus and update DB
+            let mappedStatus: MessageStatus = MessageStatus.SERVER_ACK;
+            if (status === 0) mappedStatus = MessageStatus.FAILED;
+            else if (status === 1) mappedStatus = MessageStatus.ENQUEUED;
+            else if (status === 2) mappedStatus = MessageStatus.SERVER_ACK;
+            else if (status === 3) mappedStatus = MessageStatus.DELIVERY_ACK;
+            else if (status >= 4) mappedStatus = MessageStatus.READ;
+
+            if (messageId) {
+              DbService.updateMessageStatus(messageId, mappedStatus, status).catch(() => {});
+            }
 
             WebhookService.dispatch(ackPayload, (evt, details) => {
               this.logEvent(
@@ -1075,6 +1132,11 @@ export class SessionService {
       meta.lastActiveAt = Date.now();
     }
 
+    // Update DB status to DISCONNECTED
+    DbService.updateSessionStatus(sessionId, SessionStatus.DISCONNECTED, {
+      lastActiveAt: new Date(),
+    }).catch(() => {});
+
     try {
       const redis = await getRedisClient();
       await clearRedisSession(redis, sessionId);
@@ -1139,6 +1201,9 @@ export class SessionService {
     } catch (err: any) {
       sessionLog.error({ err: err.message, stack: err.stack }, '[SessionService] Error clearing Redis on session delete');
     }
+
+    // Cascade delete in relational database
+    DbService.deleteSession(sessionId).catch(() => {});
 
     setTimeout(() => {
       this.terminatingSessions.delete(sessionId);

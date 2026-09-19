@@ -106,7 +106,7 @@
       // --------------------------------------------------------------------------
       // HTTP Helpers
       // --------------------------------------------------------------------------
-      const getAuthHeaders = () => {
+      const getAuthHeaders = (hasBody = true) => {
         const apiKey =
           (typeof window !== 'undefined' &&
             (localStorage.getItem('gateway_api_key') ||
@@ -114,15 +114,19 @@
               window.__GATEWAY_API_KEY__ ||
               window.__BOTLA_API_KEY__)) ||
           'gateway-api-key';
-        return {
-          'Content-Type': 'application/json',
+        const headers = {
           'x-api-key': apiKey,
         };
+        if (hasBody) {
+          headers['Content-Type'] = 'application/json';
+        }
+        return headers;
       };
 
       const safeFetchJson = async (url, options = {}) => {
         try {
-          const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
+          const hasBody = options.body !== undefined && options.body !== null;
+          const headers = { ...getAuthHeaders(hasBody), ...(options.headers || {}) };
           const res = await fetch(url, { ...options, headers });
           const contentType = res.headers.get('content-type') || '';
           if (!res.ok) {

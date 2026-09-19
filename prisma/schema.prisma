@@ -1,0 +1,77 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum SessionStatus {
+  QR_READY
+  PAIRING_CODE
+  CONNECTED
+  DISCONNECTED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  ENQUEUED
+  SERVER_ACK
+  DELIVERY_ACK
+  READ
+  FAILED
+}
+
+model Session {
+  id           String        @id // Tenant ID (e.g. tenant-botla-1)
+  phoneNumber  String?
+  pushName     String?
+  status       SessionStatus @default(QR_READY)
+  authMode     String        @default("qr")
+  lastActiveAt DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  messages     Message[]
+
+  @@map("sessions")
+}
+
+model Message {
+  id           String           @id // WhatsApp Message ID (e.g. 3EB0...)
+  sessionId    String
+  session      Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  direction    MessageDirection
+  remoteJid    String           // Normalized JID (@s.whatsapp.net or group @g.us)
+  lidJid       String?          // Original LID if applicable
+  text         String?
+  hasMedia     Boolean          @default(false)
+  mediaType    String?
+  mediaUrl     String?
+  status       MessageStatus    @default(ENQUEUED)
+  statusRaw    Int?             // Baileys status code (2, 3, 4)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([sessionId, remoteJid])
+  @@map("messages")
+}
+
+model WebhookLog {
+  id         String   @id @default(uuid())
+  sessionId  String
+  event      String   // message.inbound, message.ack, session.status
+  payload    Json
+  statusCode Int?
+  attempts   Int      @default(1)
+  success    Boolean  @default(false)
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([sessionId, event])
+  @@map("webhook_logs")
+}

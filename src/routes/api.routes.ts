@@ -169,6 +169,72 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     MessageController.sendMediaV1
   );
 
+  // 3. Message History & Status Queries (Prisma Persistence)
+  fastify.get(
+    '/v1/sessions/:sessionId/messages',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: {
+            sessionId: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    MessageController.listSessionMessages
+  );
+
+  fastify.get(
+    '/v1/messages/:messageId',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['messageId'],
+          properties: {
+            messageId: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    MessageController.getMessageById
+  );
+
+  // Direct and legacy session message queries
+  fastify.get(
+    '/sessions/:id/messages',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    MessageController.listSessionMessages
+  );
+
+  fastify.get(
+    '/messages/:id',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    MessageController.getMessageById
+  );
+
   /* -------------------------------------------------------------------------- */
   /* WhatsApp Session Management Endpoints                                      */
   /* -------------------------------------------------------------------------- */

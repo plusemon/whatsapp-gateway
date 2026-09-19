@@ -5,6 +5,7 @@
  */
 import crypto from 'crypto';
 import type { WASocket } from '@whiskeysockets/baileys';
+import { DbService, MessageDirection, MessageStatus } from './db.service.js';
 import { normalizeJid } from '../utils/jid.util.js';
 import { createSessionLogger } from '../utils/logger.js';
 import type { OutboundMessageResult } from '../types/message.types.js';
@@ -23,12 +24,24 @@ export class MessageService {
   ): Promise<OutboundMessageResult> {
     const sessionLog = createSessionLogger(sessionId);
     const targetJid = normalizeJid(jid);
+    const trackingId = `outbound-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
-    // Step 1: Log Enqueued
+    // Step 1: Log Enqueued and record in database
     sessionLog.info(
       { jid: targetJid, textPreview: text.slice(0, 80), step: 'enqueued' },
       '[OutboundLifecycle] Outbound text message enqueued for dispatch'
     );
+
+    // Save initial ENQUEUED state to DB
+    await DbService.createMessage({
+      id: trackingId,
+      sessionId,
+      direction: MessageDirection.OUTBOUND,
+      remoteJid: targetJid,
+      text,
+      hasMedia: false,
+      status: MessageStatus.ENQUEUED,
+    });
 
     let delay = 0;
     if (presence !== false) {
@@ -47,30 +60,60 @@ export class MessageService {
       await sock.sendPresenceUpdate('paused', targetJid);
     }
 
-    // Step 4: Dispatch message via Baileys socket
-    const sendResult = await sock.sendMessage(targetJid, { text });
-    const messageId = sendResult?.key?.id || crypto.randomUUID();
-    const timestamp = Date.now();
+    try {
+      // Step 4: Dispatch message via Baileys socket
+      const sendResult = await sock.sendMessage(targetJid, { text });
+      const messageId = sendResult?.key?.id || trackingId;
+      const timestamp = Date.now();
 
-    sessionLog.info(
-      { jid: targetJid, messageId, delayMs: delay, step: 'dispatched' },
-      '[OutboundLifecycle] Outbound text message successfully dispatched to WhatsApp socket'
-    );
+      // If Baileys assigned a new WhatsApp ID, persist under official message ID and remove temp tracking ID
+      if (messageId !== trackingId) {
+        await DbService.createMessage({
+          id: messageId,
+          sessionId,
+          direction: MessageDirection.OUTBOUND,
+          remoteJid: targetJid,
+          text,
+          hasMedia: false,
+          status: MessageStatus.SERVER_ACK,
+          statusRaw: 2,
+        });
+        // Clean up temporary tracking placeholder if distinct
+        try {
+          const prisma = DbService.prisma;
+          await prisma.message.delete({ where: { id: trackingId } }).catch(() => {});
+        } catch {
+          // ignore
+        }
+      } else {
+        await DbService.updateMessageStatus(trackingId, MessageStatus.SERVER_ACK, 2);
+      }
 
-    if (onLogged) {
-      onLogged('outbound_message', sessionId, {
-        jid: targetJid,
+      sessionLog.info(
+        { jid: targetJid, messageId, delayMs: delay, step: 'dispatched' },
+        '[OutboundLifecycle] Outbound text message successfully dispatched to WhatsApp socket'
+      );
+
+      if (onLogged) {
+        onLogged('outbound_message', sessionId, {
+          jid: targetJid,
+          messageId,
+          textPreview: text.slice(0, 80),
+          simulatedDelayMs: delay,
+        });
+      }
+
+      return {
         messageId,
-        textPreview: text.slice(0, 80),
-        simulatedDelayMs: delay,
-      });
+        timestamp,
+        status: 'SERVER_ACK',
+      };
+    } catch (err: any) {
+      // Mark as failed in DB
+      await DbService.updateMessageStatus(trackingId, MessageStatus.FAILED);
+      sessionLog.error({ jid: targetJid, err: err.message }, '[OutboundLifecycle] Failed to dispatch text message');
+      throw err;
     }
-
-    return {
-      messageId,
-      timestamp,
-      status: 'SERVER_ACK',
-    };
   }
 
   /**
@@ -91,6 +134,7 @@ export class MessageService {
   ): Promise<OutboundMessageResult> {
     const sessionLog = createSessionLogger(sessionId);
     const targetJid = normalizeJid(jid);
+    const trackingId = `outbound-media-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
     sessionLog.info(
       {
@@ -102,6 +146,19 @@ export class MessageService {
       },
       `[OutboundMedia] Media message (${type}) enqueued for dispatch`
     );
+
+    // Save initial ENQUEUED state to DB
+    await DbService.createMessage({
+      id: trackingId,
+      sessionId,
+      direction: MessageDirection.OUTBOUND,
+      remoteJid: targetJid,
+      text: options?.caption || options?.filename || null,
+      hasMedia: true,
+      mediaType: type,
+      mediaUrl: url,
+      status: MessageStatus.ENQUEUED,
+    });
 
     // Anti-ban simulation: composing or recording presence
     const presenceType = type === 'audio' && options?.ptt ? 'recording' : 'composing';
@@ -153,24 +210,53 @@ export class MessageService {
         { type, url, err: directErr.message },
         '[OutboundMedia] Direct URL dispatch failed; streaming remote media buffer as fallback'
       );
-      const fetchRes = await fetch(url, { signal: AbortSignal.timeout(30000) });
-      if (!fetchRes.ok) {
-        throw new Error(`Failed to fetch media from URL (${fetchRes.status}: ${fetchRes.statusText})`);
-      }
-      const arrayBuffer = await fetchRes.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      const fallbackMime = fetchRes.headers.get('content-type') || undefined;
+      try {
+        const fetchRes = await fetch(url, { signal: AbortSignal.timeout(30000) });
+        if (!fetchRes.ok) {
+          throw new Error(`Failed to fetch media from URL (${fetchRes.status}: ${fetchRes.statusText})`);
+        }
+        const arrayBuffer = await fetchRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const fallbackMime = fetchRes.headers.get('content-type') || undefined;
 
-      const fallbackPayload = {
-        ...messagePayload,
-        [type]: buffer,
-        ...(fallbackMime ? { mimetype: fallbackMime } : {}),
-      };
-      sendResult = await sock.sendMessage(targetJid, fallbackPayload);
+        const fallbackPayload = {
+          ...messagePayload,
+          [type]: buffer,
+          ...(fallbackMime ? { mimetype: fallbackMime } : {}),
+        };
+        sendResult = await sock.sendMessage(targetJid, fallbackPayload);
+      } catch (fallbackErr: any) {
+        await DbService.updateMessageStatus(trackingId, MessageStatus.FAILED);
+        throw fallbackErr;
+      }
     }
 
-    const messageId = sendResult?.key?.id || crypto.randomUUID();
+    const messageId = sendResult?.key?.id || trackingId;
     const timestamp = Date.now();
+
+    // If Baileys assigned official WhatsApp message ID, save and cleanup temp placeholder
+    if (messageId !== trackingId) {
+      await DbService.createMessage({
+        id: messageId,
+        sessionId,
+        direction: MessageDirection.OUTBOUND,
+        remoteJid: targetJid,
+        text: options?.caption || options?.filename || null,
+        hasMedia: true,
+        mediaType: type,
+        mediaUrl: url,
+        status: MessageStatus.SERVER_ACK,
+        statusRaw: 2,
+      });
+      try {
+        const prisma = DbService.prisma;
+        await prisma.message.delete({ where: { id: trackingId } }).catch(() => {});
+      } catch {
+        // ignore
+      }
+    } else {
+      await DbService.updateMessageStatus(trackingId, MessageStatus.SERVER_ACK, 2);
+    }
 
     sessionLog.info(
       { jid: targetJid, type, messageId, delayMs: delay, step: 'dispatched' },
@@ -197,3 +283,4 @@ export class MessageService {
     };
   }
 }
+

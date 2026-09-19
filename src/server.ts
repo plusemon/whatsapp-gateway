@@ -14,6 +14,7 @@ import { registerErrorHandlers } from './middleware/errorHandler.js';
 import { apiRoutes } from './routes/api.routes.js';
 import { getDashboardHtml, uiRoutes } from './routes/ui.routes.js';
 import { sessionService } from './services/session.service.js';
+import { DbService } from './services/db.service.js';
 import { startMediaCleanupWorker, stopMediaCleanupWorker } from './utils/cleanup.js';
 import { logger } from './utils/logger.js';
 
@@ -28,6 +29,21 @@ export async function buildServer() {
     origin: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
+  });
+
+  // 1b. Gracefully handle empty or whitespace JSON bodies (e.g., DELETE/POST without payloads)
+  fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    if (!body || typeof body !== 'string' || body.trim() === '') {
+      done(null, {});
+      return;
+    }
+    try {
+      const json = JSON.parse(body);
+      done(null, json);
+    } catch (err: any) {
+      err.statusCode = 400;
+      done(err, undefined);
+    }
   });
 
   // 2. Ensure media storage directory exists & register static media server
@@ -130,7 +146,14 @@ export async function startServer() {
         logger.warn({ err: redisErr.message }, '[Server] Warning disconnecting Redis during shutdown');
       }
 
-      // 4. Close Fastify server
+      // 4. Disconnect Prisma database client
+      try {
+        await DbService.disconnect();
+      } catch (dbErr: any) {
+        logger.warn({ err: dbErr.message }, '[Server] Warning disconnecting Prisma during shutdown');
+      }
+
+      // 5. Close Fastify server
       try {
         await server.close();
         logger.info('[Server] HTTP server closed cleanly. Exiting process.');

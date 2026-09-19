@@ -22,6 +22,7 @@ export interface GatewayConfig {
   logRetentionDays: number;
   mediaRetentionHours: number;
   mediaCleanupIntervalHours: number;
+  databaseUrl: string;
 }
 
 function parseNumber(value: string | undefined, defaultValue: number): number {
@@ -41,6 +42,7 @@ export const config: GatewayConfig = {
   publicUrl: process.env.PUBLIC_URL || process.env.BASE_URL || '',
   redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
   redisPrefix: process.env.REDIS_PREFIX || 'wa:session:',
+  databaseUrl: process.env.DATABASE_URL || '',
   webhookUrl: defaultWebhookUrl,
   botlaWebhookUrl: defaultWebhookUrl,
   webhookSecret: process.env.WEBHOOK_SECRET || 'your_hmac_secret_here',

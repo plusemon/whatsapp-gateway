@@ -4,6 +4,7 @@
  */
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { sessionService } from '../services/session.service.js';
+import { DbService, MessageDirection } from '../services/db.service.js';
 import { ResponseUtil } from '../utils/response.util.js';
 import type {
   SendMediaBody,
@@ -14,6 +15,71 @@ import type {
 } from '../types/index.js';
 
 export class MessageController {
+  /**
+   * GET /api/v1/sessions/:sessionId/messages
+   * Paginated list of historical messages for a tenant session.
+   */
+  public static async listSessionMessages(
+    request: FastifyRequest<{
+      Params: { sessionId?: string; id?: string };
+      Querystring: {
+        direction?: MessageDirection;
+        remoteJid?: string;
+        limit?: number;
+        offset?: number;
+      };
+    }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply> {
+    const sessionId = request.params.sessionId || request.params.id;
+    const { direction, remoteJid, limit, offset } = request.query || {};
+
+    if (!sessionId) {
+      return ResponseUtil.error(reply, 'sessionId parameter is required.', 400, 'VALIDATION_ERROR');
+    }
+
+    try {
+      const data = await DbService.listSessionMessages(sessionId, {
+        direction,
+        remoteJid,
+        limit: limit ? Number(limit) : undefined,
+        offset: offset ? Number(offset) : undefined,
+      });
+
+      return ResponseUtil.success(reply, data, 200);
+    } catch (err: any) {
+      request.log.error({ sessionId, err: err.message }, 'Failed to list session messages');
+      return ResponseUtil.error(reply, err.message || 'Failed to list messages', 500, 'QUERY_FAILED');
+    }
+  }
+
+  /**
+   * GET /api/v1/messages/:messageId
+   * Retrieve message delivery lifecycle status and metadata by message ID.
+   */
+  public static async getMessageById(
+    request: FastifyRequest<{ Params: { messageId?: string; id?: string } }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply> {
+    const messageId = request.params.messageId || request.params.id;
+
+    if (!messageId) {
+      return ResponseUtil.error(reply, 'messageId parameter is required.', 400, 'VALIDATION_ERROR');
+    }
+
+    try {
+      const message = await DbService.getMessage(messageId);
+      if (!message) {
+        return ResponseUtil.error(reply, `Message '${messageId}' not found`, 404, 'MESSAGE_NOT_FOUND');
+      }
+
+      return ResponseUtil.success(reply, message, 200);
+    } catch (err: any) {
+      request.log.error({ messageId, err: err.message }, 'Failed to query message by ID');
+      return ResponseUtil.error(reply, err.message || 'Failed to query message', 500, 'QUERY_FAILED');
+    }
+  }
+
   /**
    * POST /api/v1/messages/send-text
    * Standardized REST API v1 Text Dispatch
