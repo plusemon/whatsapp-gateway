@@ -2,11 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import { config } from '../config/env.js';
 import { logger } from './logger.js';
-import type { LogCleanupResult, MediaCleanupResult } from '../types/index.js';
+import type { MediaCleanupResult } from '../types/index.js';
 
 let cleanupIntervalTimer: NodeJS.Timeout | null = null;
 let isCleanupInProgress = false;
-let isLogCleanupInProgress = false;
 
 /**
  * Formats byte counts into human-readable strings (e.g., 2.45 MB).
@@ -19,91 +18,6 @@ export function formatBytes(bytes: number): string {
   const formatted = parseFloat((bytes / Math.pow(k, i)).toFixed(2));
   return `${formatted} ${sizes[i]}`;
 }
-
-/**
- * Scans the `storage/logs` directory and prunes log files older than the retention threshold.
- * Prevents log disk bloat across days/weeks of continuous operation.
- *
- * @param retentionDays Threshold in days (defaults to config.logRetentionDays or 14)
- */
-export async function cleanLogStorage(retentionDays?: number): Promise<LogCleanupResult> {
-  const targetRetentionDays = retentionDays ?? config.logRetentionDays ?? 14;
-  const retentionMs = targetRetentionDays * 24 * 60 * 60 * 1000;
-  const cutoffTime = Date.now() - retentionMs;
-  const logsDir = path.resolve(process.cwd(), 'storage/logs');
-
-  const result: LogCleanupResult = {
-    success: true,
-    deletedFilesCount: 0,
-    freedBytes: 0,
-    freedBytesFormatted: '0 B',
-    retentionDays: targetRetentionDays,
-    timestamp: new Date().toISOString(),
-  };
-
-  if (!fs.existsSync(logsDir)) {
-    return result;
-  }
-
-  if (isLogCleanupInProgress) {
-    logger.debug('[LogCleanup] Log cleanup already in progress, skipping concurrent run');
-    return result;
-  }
-
-  isLogCleanupInProgress = true;
-  try {
-    const entries = await fs.promises.readdir(logsDir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (entry.isFile()) {
-        const filePath = path.join(logsDir, entry.name);
-        
-        // Never delete active fixed combined.log or error.log during rotation unless explicitly rotated
-        const isRotatedOrDated = entry.name.match(/\d{4}-\d{2}-\d{2}/) || entry.name.endsWith('.old') || entry.name.endsWith('.gz');
-
-        try {
-          const stat = await fs.promises.stat(filePath);
-          if (stat.mtimeMs < cutoffTime && (isRotatedOrDated || entry.name.startsWith('gateway-'))) {
-            await fs.promises.unlink(filePath);
-            result.deletedFilesCount++;
-            result.freedBytes += stat.size;
-            logger.info(
-              {
-                file: entry.name,
-                ageDays: Math.round((Date.now() - stat.mtimeMs) / (1000 * 60 * 60 * 24)),
-                size: stat.size,
-              },
-              '[LogCleanup] Purged expired log file'
-            );
-          }
-        } catch (fileErr: any) {
-          logger.warn({ file: entry.name, err: fileErr.message }, '[LogCleanup] Warning checking log file');
-        }
-      }
-    }
-
-    result.freedBytesFormatted = formatBytes(result.freedBytes);
-    if (result.deletedFilesCount > 0) {
-      logger.info(
-        {
-          deletedFiles: result.deletedFilesCount,
-          freed: result.freedBytesFormatted,
-          retentionDays: targetRetentionDays,
-        },
-        '[LogCleanup] Completed log storage retention cleanup'
-      );
-    }
-    return result;
-  } catch (err: any) {
-    logger.error({ err: err.message }, '[LogCleanup] Error executing log storage retention cleanup');
-    result.success = false;
-    result.freedBytesFormatted = formatBytes(result.freedBytes);
-    return result;
-  } finally {
-    isLogCleanupInProgress = false;
-  }
-}
-
 
 /**
  * Scans the `storage/media` directory and removes files older than the retention threshold.
@@ -182,7 +96,6 @@ export async function cleanMediaStorage(retentionHours?: number): Promise<MediaC
             }
           }
 
-          // Check if session directory is now empty and can be pruned
           const remainingFiles = await fs.promises.readdir(sessionDir);
           if (remainingFiles.length === 0) {
             try {
@@ -200,7 +113,6 @@ export async function cleanMediaStorage(retentionHours?: number): Promise<MediaC
           );
         }
       } else if (entry.isFile()) {
-        // Loose file in root storage/media
         try {
           const stat = await fs.promises.stat(fullPath);
           if (stat.mtimeMs < cutoffTime) {
@@ -237,12 +149,6 @@ export async function cleanMediaStorage(retentionHours?: number): Promise<MediaC
   }
 }
 
-/**
- * Starts the periodic background worker for media storage retention cleaning.
- *
- * @param intervalHours Periodic check interval in hours (defaults to config.mediaCleanupIntervalHours or 6)
- * @param retentionHours Stale file threshold in hours (defaults to config.mediaRetentionHours or 48)
- */
 export function startMediaCleanupWorker(
   intervalHours?: number,
   retentionHours?: number
@@ -251,7 +157,6 @@ export function startMediaCleanupWorker(
   const targetRetentionHours = retentionHours ?? config.mediaRetentionHours ?? 48;
   const intervalMs = targetIntervalHours * 60 * 60 * 1000;
 
-  // Clear any existing timer
   stopMediaCleanupWorker();
 
   logger.info(
@@ -262,27 +167,18 @@ export function startMediaCleanupWorker(
     '[MediaCleanup] Media retention cleanup worker initialized'
   );
 
-  // Initial non-blocking run after a short 10-second delay
   setTimeout(() => {
     cleanMediaStorage(targetRetentionHours).catch((err) => {
       logger.error({ err: err.message }, '[MediaCleanup] Initial background cleanup failed');
     });
-    cleanLogStorage().catch((err) => {
-      logger.error({ err: err.message }, '[LogCleanup] Initial background log cleanup failed');
-    });
   }, 10000).unref();
 
-  // Periodic scheduled interval
   cleanupIntervalTimer = setInterval(() => {
     cleanMediaStorage(targetRetentionHours).catch((err) => {
       logger.error({ err: err.message }, '[MediaCleanup] Scheduled background cleanup failed');
     });
-    cleanLogStorage().catch((err) => {
-      logger.error({ err: err.message }, '[LogCleanup] Scheduled background log cleanup failed');
-    });
   }, intervalMs);
 
-  // Unref timer so it does not block Node process exit
   if (cleanupIntervalTimer.unref) {
     cleanupIntervalTimer.unref();
   }
@@ -293,9 +189,6 @@ export function startMediaCleanupWorker(
   };
 }
 
-/**
- * Stops the periodic media cleanup worker.
- */
 export function stopMediaCleanupWorker(): void {
   if (cleanupIntervalTimer) {
     clearInterval(cleanupIntervalTimer);

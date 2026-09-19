@@ -444,9 +444,6 @@
             <button id="stream-tab-btn-events" onclick="window.switchStreamTab('events')" class="px-3.5 py-1.5 rounded-lg text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
               <span>Gateway Events</span>
             </button>
-            <button id="stream-tab-btn-files" onclick="window.switchStreamTab('files')" class="px-3.5 py-1.5 rounded-lg text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
-              <span>Disk Logs Explorer</span>
-            </button>
           </div>
           <div id="sse-connection-label" class="text-emerald-400 text-xs font-mono flex items-center gap-1.5">
             <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> SSE Active Stream
@@ -503,29 +500,7 @@
           <div id="stream-counter" class="text-xs text-zinc-500 font-mono text-right">0 events logged</div>
         </div>
 
-        <!-- Subview 3: Disk Logs & Rotation Explorer -->
-        <div id="subview-log-files" class="hidden flex-1 flex flex-col space-y-3">
-          <div class="flex items-center justify-between">
-            <div class="text-xs text-zinc-400">
-              <span>Total Disk Usage: </span>
-              <span id="log-total-disk-usage" class="font-bold text-white font-mono">0 B</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <button onclick="window.triggerLogCleanup()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition cursor-pointer flex items-center gap-1.5" title="Purge files older than 14 days">
-                <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                <span>Retention Clean</span>
-              </button>
-              <button onclick="window.confirmClearAllLogs()" class="px-3 py-1 text-xs rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition cursor-pointer flex items-center gap-1.5" title="Truncate all log files to 0 B">
-                <span>Clear All</span>
-              </button>
-            </div>
-          </div>
-
-          <div id="log-files-list" class="flex-1 bg-zinc-950/80 rounded-xl p-3 border border-zinc-900 overflow-y-auto max-h-[440px] space-y-2 text-xs">
-            <div class="text-zinc-500 text-center py-8">Loading log files...</div>
-          </div>
         </div>
-
       </div>
     </section>
 
@@ -641,90 +616,6 @@
           <span id="btn-confirm-purge-text">Purge Session</span>
         </button>
       </div>
-    </div>
-  </div>
-
-  <!-- Log Clear Confirmation Modal -->
-  <div id="clear-log-modal" class="fixed inset-0 z-[70] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
-    <div class="card-surface rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl relative border border-zinc-800">
-      <div class="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-      </div>
-      <div class="text-center space-y-1">
-        <h3 id="clear-log-modal-title" class="font-bold text-white text-base">Clear Log File?</h3>
-        <p id="clear-log-modal-desc" class="text-xs text-zinc-400">This will safely truncate the log file to 0 bytes without disrupting running gateway services:</p>
-        <p id="clear-log-target-name" class="text-xs font-mono font-bold text-rose-400 py-1 break-all"></p>
-      </div>
-      <div class="grid grid-cols-2 gap-2 pt-2">
-        <button id="btn-cancel-clear-log" onclick="window.closeClearLogModal()" class="py-2.5 px-3 rounded-xl card-surface hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition cursor-pointer">Cancel</button>
-        <button id="btn-confirm-clear-log" onclick="window.executeConfirmedLogClear()" class="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/40">
-          <span id="btn-confirm-clear-log-text">Clear File</span>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Interactive Disk Log Viewer Modal -->
-  <div id="log-viewer-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 hidden">
-    <div class="card-surface rounded-2xl w-full max-w-5xl h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-zinc-800">
-      
-      <!-- Modal Header -->
-      <div class="px-4 py-3 bg-zinc-950 border-b border-zinc-800 flex items-center justify-between gap-3">
-        <div class="min-w-0 flex items-center gap-2.5">
-          <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
-          <div class="min-w-0">
-            <h3 id="log-viewer-filename" class="font-mono font-bold text-white text-sm truncate">combined.log</h3>
-            <p id="log-viewer-meta-subtitle" class="text-[10px] text-zinc-400 font-mono truncate">storage/logs/combined.log</p>
-          </div>
-          <span id="log-viewer-size-badge" class="hidden sm:inline px-2 py-0.5 rounded text-[10px] bg-zinc-800 text-zinc-300 font-mono">0 B</span>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <!-- Lines Selector -->
-          <div class="flex items-center gap-1 bg-zinc-900 p-1 rounded-lg border border-zinc-800 text-[11px] font-mono">
-            <span class="text-zinc-500 text-[10px] px-1 hidden md:inline">Lines:</span>
-            <button id="lines-pill-50" onclick="window.setLogViewerLines(50)" class="px-2 py-0.5 rounded text-zinc-400 hover:text-white transition cursor-pointer">50</button>
-            <button id="lines-pill-200" onclick="window.setLogViewerLines(200)" class="px-2 py-0.5 rounded bg-zinc-800 text-white font-semibold transition cursor-pointer">200</button>
-            <button id="lines-pill-500" onclick="window.setLogViewerLines(500)" class="px-2 py-0.5 rounded text-zinc-400 hover:text-white transition cursor-pointer">500</button>
-          </div>
-
-          <button id="btn-log-viewer-refresh" onclick="window.refreshLogViewerContent()" class="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white transition cursor-pointer" title="Refresh log content">
-            <svg id="log-viewer-refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-          </button>
-
-          <button id="btn-log-viewer-copy" onclick="window.copyLogViewerContent()" class="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white transition cursor-pointer" title="Copy content to clipboard">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
-          </button>
-
-          <button id="btn-log-viewer-download" onclick="window.downloadCurrentLogViewerFile()" class="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white transition cursor-pointer" title="Download raw file">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-          </button>
-
-          <button id="btn-log-viewer-clear" onclick="window.confirmClearCurrentLogFile()" class="p-2 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 transition cursor-pointer" title="Clear/Truncate this file">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-          </button>
-
-          <button id="btn-log-viewer-close" onclick="window.closeLogViewer()" class="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition cursor-pointer">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-          </button>
-        </div>
-      </div>
-
-      <!-- Terminal Content Area -->
-      <div id="log-viewer-content" class="flex-1 bg-black/95 p-3 sm:p-4 overflow-auto font-mono text-xs select-text">
-        <div class="text-zinc-500 text-center py-12 font-sans">Reading log file content...</div>
-      </div>
-
-      <!-- Footer Bar -->
-      <div class="px-4 py-2 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between text-[11px] text-zinc-400 font-mono">
-        <div id="log-viewer-footer-stats">Showing last 200 lines</div>
-        <div class="flex items-center gap-2">
-          <button onclick="window.scrollLogViewerToTop()" class="hover:text-white transition cursor-pointer">Top ↑</button>
-          <span>·</span>
-          <button onclick="window.scrollLogViewerToBottom()" class="hover:text-white transition cursor-pointer">Bottom ↓</button>
-        </div>
-      </div>
-
     </div>
   </div>
 

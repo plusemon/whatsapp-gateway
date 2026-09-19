@@ -267,7 +267,9 @@ export class SessionService {
             (errorMessage.includes('QR refs attempts ended') ||
               (!meta.user && (statusCode === DisconnectReason.timedOut || statusCode === 408) && (meta.status === 'qr_ready' || meta.status === 'connecting')));
 
-          sessionLog.warn(
+          const logMethod = isLoggedOut || (statusCode && statusCode >= 500) ? 'warn' : 'info';
+
+          sessionLog[logMethod](
             {
               statusCode,
               category,

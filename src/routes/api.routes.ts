@@ -22,62 +22,8 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // WhatsApp Web protocol version cache & sync
   fastify.get('/system/version', SessionController.getVersion);
 
-  // Storage retention cleanups & log management
+  // Storage retention cleanups
   fastify.post('/media/cleanup', SystemController.cleanupMedia);
-  fastify.post('/logs/cleanup', SystemController.cleanupLogs);
-  fastify.get('/logs/files', SystemController.getLogFiles);
-  fastify.post(
-    '/logs/clear',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          properties: {
-            file: { type: 'string' },
-            target: { type: 'string' },
-          },
-        },
-        querystring: {
-          type: 'object',
-          properties: {
-            file: { type: 'string' },
-          },
-        },
-      },
-    },
-    SystemController.clearLogFile
-  );
-  fastify.get(
-    '/logs/view',
-    {
-      schema: {
-        querystring: {
-          type: 'object',
-          required: ['file'],
-          properties: {
-            file: { type: 'string', minLength: 1 },
-            lines: { anyOf: [{ type: 'number' }, { type: 'string' }] },
-          },
-        },
-      },
-    },
-    SystemController.viewLogFile
-  );
-  fastify.get(
-    '/logs/download',
-    {
-      schema: {
-        querystring: {
-          type: 'object',
-          required: ['file'],
-          properties: {
-            file: { type: 'string', minLength: 1 },
-          },
-        },
-      },
-    },
-    SystemController.downloadLogFile
-  );
 
   // Real-time structured log stream (SSE) & Query
   fastify.get('/logs/stream', SystemController.streamLogs);
