@@ -70,7 +70,7 @@ describe('Webhook DLQ & Management REST Routes', () => {
   it('POST /api/v1/webhooks/retry/:logId should re-enqueue a failed webhook job', async () => {
     // Setup session webhook destination
     await WebhookService.setSessionConfig('tenant-retry-session-1', {
-      url: 'https://core.botla.ai/api/webhooks/whatsapp',
+      url: 'https://core.example.com/api/webhooks/whatsapp',
       secret: 'retry-secret',
       enabled: true,
     });

@@ -74,16 +74,17 @@ body { background-color: #090d16 !important; color: #f1f5f9 !important; }
 `;
 
 export default fp(async (fastify: FastifyInstance) => {
+  const appName = process.env.APP_NAME || 'WhatsApp Gateway';
+
   await fastify.register(swagger, {
     openapi: {
       openapi: '3.0.3',
       info: {
-        title: 'Botla WhatsApp Gateway REST API',
+        title: `${appName} REST API`,
         description: 'High-performance, headless WhatsApp API microservice powered by Baileys, Redis, and Prisma.',
         version: '1.2.0',
         contact: {
-          name: 'Botla Engineering Support',
-          email: 'support@botla.ai',
+          name: 'API Support',
         },
       },
       servers: [
@@ -98,7 +99,7 @@ export default fp(async (fastify: FastifyInstance) => {
             type: 'apiKey',
             name: 'x-api-key',
             in: 'header',
-            description: 'Provide your secret gateway API key (e.g. x-api-key: secret-key).',
+            description: 'Provide your secret gateway API key.',
           },
         },
       },
@@ -120,7 +121,7 @@ export default fp(async (fastify: FastifyInstance) => {
       displayRequestDuration: true,
     },
     theme: {
-      title: 'Botla WhatsApp Gateway - API Documentation',
+      title: `${appName} - API Documentation`,
       css: [
         {
           filename: 'custom-dark-theme.css',

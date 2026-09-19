@@ -26,13 +26,13 @@ describe('Webhook Worker Processor & HMAC Signer', () => {
       };
     });
 
-    const secret = 'super-secret-botla-key';
+    const secret = 'super-secret-gateway-key';
     const jobData = {
       id: 'job-wh-100',
       attemptsMade: 0,
       data: {
         sessionId: 'tenant-hmac-1',
-        targetUrl: 'https://core.botla.ai/api/webhooks/whatsapp',
+        targetUrl: 'https://core.example.com/api/webhooks/whatsapp',
         secret,
         token: 'bearer-token-abc',
         event: 'message.inbound',
@@ -79,7 +79,7 @@ describe('Webhook Worker Processor & HMAC Signer', () => {
       attemptsMade: 1,
       data: {
         sessionId: 'tenant-err-1',
-        targetUrl: 'https://core.botla.ai/api/webhooks/whatsapp',
+        targetUrl: 'https://core.example.com/api/webhooks/whatsapp',
         secret: 'test-secret',
         event: 'message.inbound',
         data: { text: 'Will fail' },

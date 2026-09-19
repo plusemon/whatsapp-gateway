@@ -25,7 +25,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
             sessionId: {
               type: 'string',
               minLength: 1,
-              example: 'tenant-botla-1',
+              example: 'tenant-default-1',
               description: 'Unique tenant identifier',
             },
             authMode: {
@@ -45,7 +45,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
               data: {
                 type: 'object',
                 properties: {
-                  sessionId: { type: 'string', example: 'tenant-botla-1' },
+                  sessionId: { type: 'string', example: 'tenant-default-1' },
                   status: { type: 'string', example: 'idle' },
                   authMode: { type: 'string', example: 'qr' },
                   qr: { type: 'string', nullable: true, example: '2@AbCdEf...' },
@@ -88,7 +88,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
             sessionId: {
               type: 'string',
               minLength: 1,
-              example: 'tenant-botla-1',
+              example: 'tenant-default-1',
               description: 'Unique tenant identifier',
             },
             phoneNumber: {
@@ -171,12 +171,12 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
                     items: {
                       type: 'object',
                       properties: {
-                        id: { type: 'string', example: 'tenant-botla-1' },
-                        sessionId: { type: 'string', example: 'tenant-botla-1' },
+                        id: { type: 'string', example: 'tenant-default-1' },
+                        sessionId: { type: 'string', example: 'tenant-default-1' },
                         status: { type: 'string', example: 'connected' },
                         phoneNumber: { type: 'string', nullable: true, example: '8801995329555' },
                         phone: { type: 'string', nullable: true, example: '8801995329555' },
-                        pushName: { type: 'string', nullable: true, example: 'Botla Support' },
+                        pushName: { type: 'string', nullable: true, example: 'Support Team' },
                       },
                     },
                   },
@@ -214,7 +214,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['sessionId'],
           properties: {
-            sessionId: { type: 'string', minLength: 1, example: 'tenant-botla-1', description: 'Tenant session identifier' },
+            sessionId: { type: 'string', minLength: 1, example: 'tenant-default-1', description: 'Tenant session identifier' },
           },
         },
         response: {
@@ -226,10 +226,10 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
               data: {
                 type: 'object',
                 properties: {
-                  sessionId: { type: 'string', example: 'tenant-botla-1' },
+                  sessionId: { type: 'string', example: 'tenant-default-1' },
                   status: { type: 'string', example: 'connected' },
                   phone: { type: 'string', nullable: true, example: '8801995329555' },
-                  pushName: { type: 'string', nullable: true, example: 'Botla Support' },
+                  pushName: { type: 'string', nullable: true, example: 'Support Team' },
                 },
               },
             },
@@ -243,7 +243,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
                 type: 'object',
                 properties: {
                   code: { type: 'string', example: 'SESSION_NOT_FOUND' },
-                  message: { type: 'string', example: "Session 'tenant-botla-1' not found" },
+                  message: { type: 'string', example: "Session 'tenant-default-1' not found" },
                 },
               },
             },
@@ -264,7 +264,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['id'],
           properties: {
-            id: { type: 'string', example: 'tenant-botla-1' },
+            id: { type: 'string', example: 'tenant-default-1' },
           },
         },
       },
@@ -284,7 +284,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['sessionId'],
           properties: {
-            sessionId: { type: 'string', minLength: 1, example: 'tenant-botla-1' },
+            sessionId: { type: 'string', minLength: 1, example: 'tenant-default-1' },
           },
         },
         response: {
@@ -296,7 +296,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
               data: {
                 type: 'object',
                 properties: {
-                  sessionId: { type: 'string', example: 'tenant-botla-1' },
+                  sessionId: { type: 'string', example: 'tenant-default-1' },
                   status: { type: 'string', example: 'disconnected' },
                   message: { type: 'string', example: 'Device unlinked successfully' },
                 },
@@ -319,7 +319,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['id'],
           properties: {
-            id: { type: 'string', example: 'tenant-botla-1' },
+            id: { type: 'string', example: 'tenant-default-1' },
           },
         },
       },
@@ -339,7 +339,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['sessionId'],
           properties: {
-            sessionId: { type: 'string', minLength: 1, example: 'tenant-botla-1' },
+            sessionId: { type: 'string', minLength: 1, example: 'tenant-default-1' },
           },
         },
         response: {
@@ -351,7 +351,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
               data: {
                 type: 'object',
                 properties: {
-                  sessionId: { type: 'string', example: 'tenant-botla-1' },
+                  sessionId: { type: 'string', example: 'tenant-default-1' },
                   message: { type: 'string', example: 'Session purged successfully' },
                 },
               },
@@ -373,7 +373,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['id'],
           properties: {
-            id: { type: 'string', example: 'tenant-botla-1' },
+            id: { type: 'string', example: 'tenant-default-1' },
           },
         },
       },
@@ -391,7 +391,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['id'],
           properties: {
-            id: { type: 'string', example: 'tenant-botla-1' },
+            id: { type: 'string', example: 'tenant-default-1' },
           },
         },
       },
@@ -410,7 +410,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['id'],
           properties: {
-            id: { type: 'string', minLength: 1, example: 'tenant-botla-1' },
+            id: { type: 'string', minLength: 1, example: 'tenant-default-1' },
           },
         },
         body: {
@@ -435,7 +435,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['id'],
           properties: {
-            id: { type: 'string', example: 'tenant-botla-1' },
+            id: { type: 'string', example: 'tenant-default-1' },
           },
         },
         response: {
@@ -447,7 +447,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
               data: {
                 type: 'object',
                 properties: {
-                  sessionId: { type: 'string', example: 'tenant-botla-1' },
+                  sessionId: { type: 'string', example: 'tenant-default-1' },
                   qr: { type: 'string', nullable: true, example: '2@AbCdEf...' },
                   status: { type: 'string', example: 'qr_ready' },
                   qrDataUrl: { type: 'string', nullable: true, example: 'data:image/png;base64,...' },
@@ -472,7 +472,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['id'],
           properties: {
-            id: { type: 'string', example: 'tenant-botla-1' },
+            id: { type: 'string', example: 'tenant-default-1' },
           },
         },
         body: {

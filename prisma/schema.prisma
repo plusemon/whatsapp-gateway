@@ -28,7 +28,7 @@ enum MessageStatus {
 }
 
 model Session {
-  id           String        @id // Tenant ID (e.g. tenant-botla-1)
+  id           String        @id // Tenant ID (e.g. tenant-default-1)
   phoneNumber  String?
   pushName     String?
   status       SessionStatus @default(QR_READY)

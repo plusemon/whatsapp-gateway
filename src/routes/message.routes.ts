@@ -25,7 +25,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
             sessionId: {
               type: 'string',
               minLength: 1,
-              example: 'tenant-botla-1',
+              example: 'tenant-default-1',
               description: 'Tenant session ID',
             },
             to: {
@@ -37,7 +37,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
             message: {
               type: 'string',
               minLength: 1,
-              example: 'Hello from Botla Gateway!',
+              example: 'Hello from WhatsApp Gateway!',
               description: 'Message body text',
             },
             presence: {
@@ -98,7 +98,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
             sessionId: {
               type: 'string',
               minLength: 1,
-              example: 'tenant-botla-1',
+              example: 'tenant-default-1',
               description: 'Tenant session ID',
             },
             to: {
@@ -198,12 +198,12 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
                 type: 'object',
                 properties: {
                   id: { type: 'string', example: '3EB084DC6F0385409BFEDC' },
-                  sessionId: { type: 'string', example: 'tenant-botla-1' },
+                  sessionId: { type: 'string', example: 'tenant-default-1' },
                   remoteJid: { type: 'string', example: '8801995329555@s.whatsapp.net' },
                   direction: { type: 'string', example: 'OUTBOUND' },
                   status: { type: 'string', example: 'DELIVERY_ACK' },
                   type: { type: 'string', example: 'text' },
-                  text: { type: 'string', nullable: true, example: 'Hello from Botla Gateway!' },
+                  text: { type: 'string', nullable: true, example: 'Hello from WhatsApp Gateway!' },
                   createdAt: { type: 'string', format: 'date-time' },
                   updatedAt: { type: 'string', format: 'date-time' },
                 },
@@ -263,7 +263,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
             sessionId: {
               type: 'string',
               minLength: 1,
-              example: 'tenant-botla-1',
+              example: 'tenant-default-1',
               description: 'Tenant session identifier',
             },
           },
@@ -309,7 +309,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
                       type: 'object',
                       properties: {
                         id: { type: 'string', example: '3EB084DC6F0385409BFEDC' },
-                        sessionId: { type: 'string', example: 'tenant-botla-1' },
+                        sessionId: { type: 'string', example: 'tenant-default-1' },
                         remoteJid: { type: 'string', example: '8801995329555@s.whatsapp.net' },
                         direction: { type: 'string', example: 'OUTBOUND' },
                         status: { type: 'string', example: 'READ' },
@@ -338,7 +338,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['id'],
           properties: {
-            id: { type: 'string', example: 'tenant-botla-1' },
+            id: { type: 'string', example: 'tenant-default-1' },
           },
         },
       },
@@ -357,7 +357,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['id'],
           properties: {
-            id: { type: 'string', example: 'tenant-botla-1' },
+            id: { type: 'string', example: 'tenant-default-1' },
           },
         },
         body: {
@@ -365,7 +365,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           required: ['jid', 'text'],
           properties: {
             jid: { type: 'string', minLength: 1, example: '8801995329555@s.whatsapp.net' },
-            text: { type: 'string', minLength: 1, example: 'Hello from Botla!' },
+            text: { type: 'string', minLength: 1, example: 'Hello from WhatsApp Gateway!' },
           },
         },
       },
@@ -383,7 +383,7 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           type: 'object',
           required: ['id'],
           properties: {
-            id: { type: 'string', example: 'tenant-botla-1' },
+            id: { type: 'string', example: 'tenant-default-1' },
           },
         },
         body: {

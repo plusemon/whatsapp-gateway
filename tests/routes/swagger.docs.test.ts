@@ -38,7 +38,7 @@ describe('OpenAPI / Swagger Documentation (/docs & /docs/json)', () => {
     // Verify OpenAPI version and basic metadata
     expect(spec.openapi).toMatch(/^3\.0\./);
     expect(spec.info).toBeDefined();
-    expect(spec.info.title).toBe('Botla WhatsApp Gateway REST API');
+    expect(spec.info.title).toBe('WhatsApp Gateway REST API');
     expect(spec.info.version).toBe('1.2.0');
 
     // Verify servers configuration uses relative/dynamic root for CORS & mobile/cloud safety
@@ -94,6 +94,6 @@ describe('OpenAPI / Swagger Documentation (/docs & /docs/json)', () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('yaml');
     expect(response.body).toContain('openapi: 3.0.');
-    expect(response.body).toContain('Botla WhatsApp Gateway REST API');
+    expect(response.body).toContain('WhatsApp Gateway REST API');
   });
 });

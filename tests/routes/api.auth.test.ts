@@ -6,7 +6,7 @@ import { ResponseUtil } from '../../src/utils/response.util.js';
 
 describe('Fastify API Auth Middleware (api.auth.test.ts)', () => {
   let app: FastifyInstance;
-  const TEST_API_KEY = 'secret-test-botla-api-key-999';
+  const TEST_API_KEY = 'secret-test-gateway-api-key-999';
   const originalApiKey = process.env.API_GATEWAY_KEY;
 
   beforeAll(async () => {

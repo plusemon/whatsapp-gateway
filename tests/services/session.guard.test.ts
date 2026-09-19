@@ -25,7 +25,7 @@ const { socketEventListeners, mockSocketEv, mockWASocket, dummyRedis } = vi.hois
     end: vi.fn(),
     logout: vi.fn(),
     requestPairingCode: vi.fn().mockResolvedValue('ABCD1234'),
-    user: { id: '8801995329555:1@s.whatsapp.net', name: 'Botla Test' },
+    user: { id: '8801995329555:1@s.whatsapp.net', name: 'Gateway Test' },
     authState: { creds: { registered: false } },
   };
 

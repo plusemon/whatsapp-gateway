@@ -16,7 +16,7 @@ describe('Resilient Webhook Queue Definition & Enqueueing', () => {
   it('enqueueWebhookJob should enqueue job payload correctly', async () => {
     const payload: WebhookJobPayload = {
       sessionId: 'tenant-test-wh-1',
-      targetUrl: 'https://core.botla.ai/api/webhooks/whatsapp',
+      targetUrl: 'https://core.example.com/api/webhooks/whatsapp',
       secret: 'secret-key-12345',
       token: 'jwt-bearer-token',
       event: 'message.inbound',

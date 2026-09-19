@@ -187,7 +187,7 @@ export const systemRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
       schema: {
         tags: ['Webhooks'],
         summary: 'Mock receiver endpoint for testing webhook dispatches locally.',
-        description: 'Accepts inbound WhatsApp payloads and verifies X-Botla-Signature HMAC-SHA256 headers.',
+        description: 'Accepts inbound WhatsApp payloads and verifies X-Gateway-Signature HMAC-SHA256 headers.',
       },
     },
     SystemController.mockWebhook
@@ -290,7 +290,7 @@ export const systemRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
             url: { type: 'string', example: 'http://localhost:8000/api/whatsapp/webhook' },
             secret: { type: 'string', example: 'webhook-hmac-secret-key' },
             token: { type: 'string', example: 'bearer-token' },
-            sessionId: { type: 'string', example: 'tenant-botla-1' },
+            sessionId: { type: 'string', example: 'tenant-default-1' },
           },
         },
         response: {

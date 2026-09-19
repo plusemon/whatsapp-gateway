@@ -37,7 +37,7 @@ export const processWebhookJob = async (job: WebhookJobData | Job<WebhookJobPayl
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'User-Agent': 'Botla-WhatsApp-Gateway/1.2',
+    'User-Agent': 'WhatsApp-Gateway/1.2',
     'X-Signature-256': `sha256=${signature}`,
     'X-Gateway-Signature-256': `sha256=${signature}`,
     'X-Botla-Signature': `sha256=${signature}`,

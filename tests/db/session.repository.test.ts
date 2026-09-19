@@ -33,7 +33,7 @@ describe('Session Database Layer', () => {
       data: {
         status: SessionStatus.CONNECTED,
         phoneNumber: '8801995329555',
-        pushName: 'Botla Gateway',
+        pushName: 'WhatsApp Gateway',
       },
     });
 

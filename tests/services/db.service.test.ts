@@ -56,7 +56,7 @@ describe('Relational Database Persistence (DbService & Prisma ORM)', () => {
         id: sampleSessionId,
         status: SessionStatus.CONNECTED,
         phoneNumber: '8801712345678',
-        pushName: 'Botla Gateway User',
+        pushName: 'Gateway User',
       });
 
       DbService.setPrismaClient({
@@ -67,7 +67,7 @@ describe('Relational Database Persistence (DbService & Prisma ORM)', () => {
 
       const result = await DbService.updateSessionStatus(sampleSessionId, SessionStatus.CONNECTED, {
         phoneNumber: '8801712345678',
-        pushName: 'Botla Gateway User',
+        pushName: 'Gateway User',
       });
 
       expect(mockUpsert).toHaveBeenCalled();

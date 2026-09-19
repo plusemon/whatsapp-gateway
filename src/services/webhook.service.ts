@@ -327,7 +327,7 @@ export class WebhookService {
     const bodyString = JSON.stringify(payload);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': 'Botla-WhatsApp-Gateway/1.2',
+      'User-Agent': 'WhatsApp-Gateway/1.2',
       'X-Gateway-Event': eventName,
     };
 
