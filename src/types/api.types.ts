@@ -126,6 +126,18 @@ export interface LogCleanupResult {
 }
 
 /**
+ * Response for GET /api/logs/view
+ */
+export interface LogViewResponse {
+  filename: string;
+  lines: number;
+  content: string;
+  totalSizeBytes?: number;
+  sizeFormatted?: string;
+  modifiedAt?: string;
+}
+
+/**
  * Individual log file descriptor.
  */
 export interface LogFileEntry {

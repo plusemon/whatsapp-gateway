@@ -265,6 +265,170 @@ export class SystemController {
   }
 
   /**
+   * GET /api/logs/view
+   * Safely reads and tails the specified log file from storage/logs/
+   */
+  public static async viewLogFile(
+    request: FastifyRequest<{
+      Querystring: {
+        file?: string;
+        lines?: number | string;
+      };
+    }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply> {
+    try {
+      const rawFile = request.query.file?.trim();
+      if (!rawFile) {
+        return ResponseUtil.error(reply, "Query parameter 'file' is required", 400, 'MISSING_PARAM_FILE');
+      }
+
+      // Security: Strict path traversal prevention
+      if (rawFile.includes('..') || rawFile.includes('/') || rawFile.includes('\\')) {
+        return ResponseUtil.error(reply, 'Invalid file name: directory traversal characters forbidden', 400, 'INVALID_FILENAME');
+      }
+
+      const logsDir = path.resolve(process.cwd(), 'storage/logs');
+      const filename = path.basename(rawFile);
+      const filePath = path.resolve(logsDir, filename);
+
+      // Verify that the resolved path is strictly within the logs directory
+      if (!filePath.startsWith(logsDir)) {
+        return ResponseUtil.error(reply, 'Access denied: Path is outside storage/logs directory', 403, 'FORBIDDEN_PATH');
+      }
+
+      if (!fs.existsSync(filePath)) {
+        return ResponseUtil.error(reply, `Log file '${filename}' not found`, 404, 'LOG_FILE_NOT_FOUND');
+      }
+
+      const stat = await fs.promises.stat(filePath);
+      if (!stat.isFile()) {
+        return ResponseUtil.error(reply, 'Target is not a regular file', 400, 'INVALID_FILE_TYPE');
+      }
+
+      // Default to 200 lines, bounded between 1 and 5000
+      let maxLines = 200;
+      if (request.query.lines !== undefined) {
+        const parsed = Number(request.query.lines);
+        if (!isNaN(parsed) && parsed > 0) {
+          maxLines = Math.min(parsed, 5000);
+        }
+      }
+
+      let content = '';
+      let actualLineCount = 0;
+
+      if (stat.size === 0) {
+        content = '';
+        actualLineCount = 0;
+      } else if (stat.size <= 2 * 1024 * 1024) {
+        // Read file in memory if <= 2MB
+        const rawText = await fs.promises.readFile(filePath, 'utf-8');
+        const lines = rawText.split(/\r?\n/);
+        if (lines.length > 0 && lines[lines.length - 1] === '') {
+          lines.pop();
+        }
+        const sliced = lines.slice(-maxLines);
+        content = sliced.join('\n');
+        actualLineCount = sliced.length;
+      } else {
+        // For larger files, read the tail chunk based on maxLines to prevent memory spikes
+        const chunkSize = Math.min(stat.size, Math.max(256 * 1024, maxLines * 2048));
+        const buffer = Buffer.alloc(chunkSize);
+        const fd = await fs.promises.open(filePath, 'r');
+        try {
+          await fd.read(buffer, 0, chunkSize, stat.size - chunkSize);
+          const rawChunk = buffer.toString('utf-8');
+          const lines = rawChunk.split(/\r?\n/);
+          if (stat.size > chunkSize && lines.length > 1) {
+            lines.shift(); // Remove incomplete first line from byte boundary offset
+          }
+          if (lines.length > 0 && lines[lines.length - 1] === '') {
+            lines.pop();
+          }
+          const sliced = lines.slice(-maxLines);
+          content = sliced.join('\n');
+          actualLineCount = sliced.length;
+        } finally {
+          await fd.close();
+        }
+      }
+
+      return ResponseUtil.success(
+        reply,
+        {
+          filename,
+          lines: actualLineCount,
+          content,
+          totalSizeBytes: stat.size,
+          sizeFormatted: formatBytes(stat.size),
+          modifiedAt: new Date(stat.mtimeMs).toISOString(),
+          data: {
+            filename,
+            lines: actualLineCount,
+            content,
+          },
+        },
+        200
+      );
+    } catch (err: any) {
+      request.log.error({ err: err.message }, 'Failed to read log file');
+      return ResponseUtil.error(reply, 'Failed to read log file: ' + err.message, 500, 'READ_LOG_FAILED');
+    }
+  }
+
+  /**
+   * GET /api/logs/download
+   * Streams the raw log file directly as an attachment.
+   */
+  public static async downloadLogFile(
+    request: FastifyRequest<{
+      Querystring: {
+        file?: string;
+      };
+    }>,
+    reply: FastifyReply
+  ): Promise<FastifyReply | void> {
+    try {
+      const rawFile = request.query.file?.trim();
+      if (!rawFile) {
+        return ResponseUtil.error(reply, "Query parameter 'file' is required", 400, 'MISSING_PARAM_FILE');
+      }
+
+      if (rawFile.includes('..') || rawFile.includes('/') || rawFile.includes('\\')) {
+        return ResponseUtil.error(reply, 'Invalid file name: directory traversal characters forbidden', 400, 'INVALID_FILENAME');
+      }
+
+      const logsDir = path.resolve(process.cwd(), 'storage/logs');
+      const filename = path.basename(rawFile);
+      const filePath = path.resolve(logsDir, filename);
+
+      if (!filePath.startsWith(logsDir)) {
+        return ResponseUtil.error(reply, 'Access denied: Path is outside storage/logs directory', 403, 'FORBIDDEN_PATH');
+      }
+
+      if (!fs.existsSync(filePath)) {
+        return ResponseUtil.error(reply, `Log file '${filename}' not found`, 404, 'LOG_FILE_NOT_FOUND');
+      }
+
+      const stat = await fs.promises.stat(filePath);
+      if (!stat.isFile()) {
+        return ResponseUtil.error(reply, 'Target is not a regular file', 400, 'INVALID_FILE_TYPE');
+      }
+
+      reply.header('Content-Type', 'text/plain; charset=utf-8');
+      reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+      reply.header('Content-Length', stat.size);
+
+      const stream = fs.createReadStream(filePath);
+      return reply.send(stream);
+    } catch (err: any) {
+      request.log.error({ err: err.message }, 'Failed to download log file');
+      return ResponseUtil.error(reply, 'Failed to download log file: ' + err.message, 500, 'DOWNLOAD_LOG_FAILED');
+    }
+  }
+
+  /**
    * POST /api/webhook/mock
    */
   public static async mockWebhook(

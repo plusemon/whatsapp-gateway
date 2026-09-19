@@ -26,6 +26,37 @@ export const apiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   fastify.post('/media/cleanup', SystemController.cleanupMedia);
   fastify.post('/logs/cleanup', SystemController.cleanupLogs);
   fastify.get('/logs/files', SystemController.getLogFiles);
+  fastify.get(
+    '/logs/view',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          required: ['file'],
+          properties: {
+            file: { type: 'string', minLength: 1 },
+            lines: { anyOf: [{ type: 'number' }, { type: 'string' }] },
+          },
+        },
+      },
+    },
+    SystemController.viewLogFile
+  );
+  fastify.get(
+    '/logs/download',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          required: ['file'],
+          properties: {
+            file: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+    },
+    SystemController.downloadLogFile
+  );
 
   // Real-time structured log stream (SSE) & Query
   fastify.get('/logs/stream', SystemController.streamLogs);
