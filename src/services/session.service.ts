@@ -16,7 +16,7 @@ import { getRedisClient } from '../config/redis.js';
 import { extractPhoneFromJid, formatPairingCode, sanitizePhoneNumber } from '../utils/jid.util.js';
 import { createSessionLogger, logGatewayEvent, logger } from '../utils/logger.js';
 import { getWhatsAppVersion } from '../utils/versionGuard.js';
-import { MediaService } from './media.service.js';
+import { MediaService, mediaService } from './media.service.js';
 import { MessageService } from './message.service.js';
 import { WebhookService } from './webhook.service.js';
 import { DbService, SessionStatus, MessageDirection, MessageStatus } from './db.service.js';
@@ -596,20 +596,42 @@ export class SessionService {
 
           const extractedText = this.extractMessageText(msg);
 
-          // Process media via MediaService
-          const inboundMedia = await MediaService.processInboundMedia(
-            sessionId,
-            msg,
-            sock,
-            baileysLogger
+          const hasMedia = Boolean(
+            msg.message?.imageMessage ||
+            msg.message?.videoMessage ||
+            msg.message?.audioMessage ||
+            msg.message?.documentMessage ||
+            msg.message?.ephemeralMessage?.message?.imageMessage ||
+            msg.message?.ephemeralMessage?.message?.videoMessage ||
+            msg.message?.ephemeralMessage?.message?.audioMessage ||
+            msg.message?.ephemeralMessage?.message?.documentMessage ||
+            msg.message?.viewOnceMessage?.message?.imageMessage ||
+            msg.message?.viewOnceMessage?.message?.videoMessage ||
+            msg.message?.viewOnceMessageV2?.message?.imageMessage ||
+            msg.message?.viewOnceMessageV2?.message?.videoMessage ||
+            msg.message?.documentWithCaptionMessage?.message?.documentMessage
           );
+
+          // Process media via MediaService
+          let mediaPayload = null;
+          if (hasMedia) {
+            mediaPayload = await mediaService.processInboundMedia(
+              msg,
+              sessionId,
+              sock,
+              baileysLogger
+            );
+          }
 
           const inboundData = {
             key: msg.key,
+            messageId: msg.key.id,
             from: msg.key.remoteJid,
             pushName: msg.pushName || null,
             text: extractedText,
-            media: inboundMedia,
+            hasMedia,
+            media: mediaPayload,
+            timestamp: msg.messageTimestamp,
             raw: msg,
           };
 
@@ -623,8 +645,9 @@ export class SessionService {
               key: msg.key,
               pushName: msg.pushName || null,
               text: extractedText,
+              hasMedia,
               raw: msg,
-              media: inboundMedia,
+              media: mediaPayload,
             },
           };
 
@@ -632,8 +655,8 @@ export class SessionService {
             {
               from: msg.key.remoteJid,
               pushName: msg.pushName,
-              hasMedia: !!inboundMedia,
-              mediaType: inboundMedia?.type,
+              hasMedia: !!mediaPayload,
+              mediaType: mediaPayload?.type,
               textPreview: extractedText ? extractedText.slice(0, 70) : undefined,
             },
             '[InboundMessage] WhatsApp message received, preparing webhook relay'
@@ -643,12 +666,12 @@ export class SessionService {
             from: msg.key.remoteJid,
             pushName: msg.pushName,
             text: extractedText,
-            media: inboundMedia
+            media: mediaPayload
               ? {
-                  type: inboundMedia.type,
-                  url: inboundMedia.url,
-                  fileSize: inboundMedia.fileSize,
-                  filename: inboundMedia.filename,
+                  type: mediaPayload.type,
+                  url: mediaPayload.url,
+                  fileSize: mediaPayload.fileSize,
+                  filename: mediaPayload.filename || mediaPayload.fileName,
                 }
               : undefined,
           });
@@ -662,9 +685,9 @@ export class SessionService {
             remoteJid: msg.key.remoteJid || '',
             lidJid: (msg.key as any).participant || (msg.key as any).remoteJidAlt || null,
             text: extractedText || null,
-            hasMedia: !!inboundMedia,
-            mediaType: inboundMedia?.type || null,
-            mediaUrl: inboundMedia?.url || null,
+            hasMedia: !!mediaPayload,
+            mediaType: mediaPayload?.type || null,
+            mediaUrl: mediaPayload?.url || null,
             status: MessageStatus.SERVER_ACK,
             statusRaw: 2,
           }).catch(() => {});

@@ -1,13 +1,16 @@
 /**
  * Inbound & Outbound Media Pipeline Service
- * Handles media detection, streaming download from WhatsApp, disk storage, and retention management.
+ * Handles media detection, streaming decryption/download from WhatsApp,
+ * organized local disk storage (:year/:month/:sessionId/), public HTTP routing,
+ * and automated retention cleanup.
  */
 import crypto from 'crypto';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
-import { downloadMediaMessage, proto, WASocket } from '@whiskeysockets/baileys';
+import { downloadMediaMessage, proto, WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { config, getPublicBaseUrl } from '../config/env.js';
-import { createSessionLogger, logger } from '../utils/logger.js';
+import { createSessionLogger, logger as defaultLogger } from '../utils/logger.js';
 import { formatBytes } from '../utils/cleanup.js';
 import type {
   InboundMediaMetadata,
@@ -18,17 +21,45 @@ import type {
 let isCleanupInProgress = false;
 
 export class MediaService {
-  private static storageRoot = path.resolve(process.cwd(), 'storage/media');
+  constructor() {
+    this.ensureDirectoryExists(this.getBaseStorageDir());
+  }
 
   /**
-   * Ensures the root storage directory exists.
+   * Resolves the base storage directory dynamically from environment or default.
+   */
+  public getBaseStorageDir(): string {
+    return path.resolve(process.env.STORAGE_DIR || './storage/media');
+  }
+
+  /**
+   * Resolves retention days dynamically from environment or default.
+   */
+  public getRetentionDays(): number {
+    return parseInt(process.env.MEDIA_RETENTION_DAYS || '7', 10);
+  }
+
+  /**
+   * Helper to ensure directory exists on disk.
+   */
+  public async ensureDirectoryExists(dirPath: string): Promise<void> {
+    try {
+      await fsPromises.mkdir(dirPath, { recursive: true });
+    } catch (err: any) {
+      defaultLogger.error({ err: err.message, dirPath }, `[MediaService] Failed to create directory: ${dirPath}`);
+    }
+  }
+
+  /**
+   * Synchronous directory creation helper.
    */
   public static ensureStorageDir(): void {
-    if (!fs.existsSync(this.storageRoot)) {
+    const storageDir = path.resolve(process.env.STORAGE_DIR || './storage/media');
+    if (!fs.existsSync(storageDir)) {
       try {
-        fs.mkdirSync(this.storageRoot, { recursive: true });
+        fs.mkdirSync(storageDir, { recursive: true });
       } catch (err: any) {
-        logger.warn({ err: err.message }, '[MediaService] Failed creating media root directory');
+        defaultLogger.warn({ err: err.message }, '[MediaService] Failed creating media root directory');
       }
     }
   }
@@ -37,7 +68,7 @@ export class MediaService {
    * Helper to detect and extract media metadata from inbound WhatsApp messages.
    * Handles direct media messages as well as ephemeral, view-once, and captioned document envelopes.
    */
-  public static detectInboundMedia(msg: proto.IWebMessageInfo): MediaDetectedInfo | null {
+  public static detectInboundMedia(msg: proto.IWebMessageInfo | WAMessage): MediaDetectedInfo | null {
     let m = msg.message;
     if (!m) return null;
 
@@ -108,6 +139,7 @@ export class MediaService {
       'image/webp': 'webp',
       'image/gif': 'gif',
       'audio/ogg': 'ogg',
+      'audio/opus': 'opus',
       'audio/mpeg': 'mp3',
       'audio/mp4': 'm4a',
       'audio/aac': 'aac',
@@ -133,26 +165,40 @@ export class MediaService {
   }
 
   /**
-   * Downloads and saves inbound media attachment to disk and generates accessible public URL.
+   * Decrypt and save incoming media attachment from WhatsApp message.
+   * Supports both (message, sessionId, sock?, logger?) and (sessionId, message, sock?, logger?) argument order.
    */
-  public static async processInboundMedia(
-    sessionId: string,
-    msg: proto.IWebMessageInfo,
-    sock: WASocket,
-    baileysLogger?: any
-  ): Promise<InboundMediaMetadata | null> {
+  async processInboundMedia(
+    arg1: proto.IWebMessageInfo | WAMessage | string,
+    arg2: string | proto.IWebMessageInfo | WAMessage,
+    sock?: WASocket,
+    customLogger?: any
+  ): Promise<(InboundMediaMetadata & { fileName: string }) | null> {
+    let message: proto.IWebMessageInfo | WAMessage;
+    let sessionId: string;
+
+    if (typeof arg1 === 'string') {
+      sessionId = arg1;
+      message = arg2 as proto.IWebMessageInfo;
+    } else {
+      message = arg1;
+      sessionId = arg2 as string;
+    }
+
     const sessionLog = createSessionLogger(sessionId);
-    const mediaInfo = this.detectInboundMedia(msg);
+    const mediaInfo = MediaService.detectInboundMedia(message);
     if (!mediaInfo) return null;
 
     try {
       const buffer = await downloadMediaMessage(
-        msg as any,
+        message as any,
         'buffer',
         {},
         {
-          logger: baileysLogger || logger,
-          reuploadRequest: (update) => sock.updateMediaMessage(update),
+          logger: customLogger || sessionLog || defaultLogger,
+          reuploadRequest: sock
+            ? (update: any) => sock.updateMediaMessage(update)
+            : () => Promise.resolve({} as any),
         }
       );
 
@@ -160,8 +206,14 @@ export class MediaService {
         return null;
       }
 
-      const messageId = msg.key?.id || crypto.randomUUID();
-      const ext = this.getMediaExtension(
+      const date = new Date();
+      const year = date.getFullYear().toString();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const baseDir = this.getBaseStorageDir();
+      const targetDir = path.join(baseDir, year, month, sessionId);
+      await this.ensureDirectoryExists(targetDir);
+
+      const ext = MediaService.getMediaExtension(
         mediaInfo.mimetype,
         mediaInfo.filename,
         mediaInfo.type === 'image'
@@ -173,170 +225,202 @@ export class MediaService {
           : 'bin'
       );
 
-      const sessionDir = path.join(this.storageRoot, sessionId);
-      await fs.promises.mkdir(sessionDir, { recursive: true });
+      const uniqueHash = crypto.randomBytes(8).toString('hex');
+      const fileName = `${Date.now()}_${uniqueHash}.${ext}`;
+      const filePath = path.join(targetDir, fileName);
 
-      const fileNameOnDisk = `${messageId}.${ext}`;
-      const filePath = path.join(sessionDir, fileNameOnDisk);
-      await fs.promises.writeFile(filePath, buffer);
+      await fsPromises.writeFile(filePath, buffer);
 
-      const mediaAccessUrl = `${getPublicBaseUrl()}/media/${encodeURIComponent(sessionId)}/${fileNameOnDisk}`;
+      const relativePath = `/media/${year}/${month}/${sessionId}/${fileName}`;
+      const publicBase = getPublicBaseUrl();
+      const fullUrl = publicBase ? `${publicBase}${relativePath}` : relativePath;
 
-      const inboundMedia: InboundMediaMetadata = {
-        url: mediaAccessUrl,
+      const inboundMedia: InboundMediaMetadata & { fileName: string } = {
+        url: fullUrl,
+        fileName,
+        filename: mediaInfo.filename || fileName,
         mimetype: mediaInfo.mimetype,
         fileSize: buffer.length,
         caption: mediaInfo.caption,
         type: mediaInfo.type,
-        filename: mediaInfo.filename || fileNameOnDisk,
       };
 
       sessionLog.info(
         {
-          messageId,
+          messageId: message.key?.id,
           type: mediaInfo.type,
           fileSize: buffer.length,
-          url: mediaAccessUrl,
+          fileName,
+          url: fullUrl,
         },
-        '[MediaService] Extracted, buffered to disk and access URL formed'
+        '[MediaService] Inbound media downloaded, decrypted, saved to disk and public URL generated'
       );
 
       return inboundMedia;
-    } catch (mediaErr: any) {
+    } catch (err: any) {
       sessionLog.error(
-        { err: mediaErr.message, stack: mediaErr.stack, type: mediaInfo.type },
-        '[MediaService] Failed to download inbound media attachment'
+        { err: err.message, stack: err.stack, messageId: message.key?.id, type: mediaInfo.type },
+        '[MediaService] Failed to download or write inbound media'
       );
       return null;
     }
   }
 
   /**
-   * Scans the `storage/media` directory and removes files older than the retention threshold.
-   * Also prunes empty tenant session directories to prevent disk accumulation.
+   * Static method for backwards compatibility with existing codebase.
    */
-  public static async cleanStorage(retentionHours?: number): Promise<MediaCleanupResult> {
-    const targetRetentionHours = retentionHours ?? config.mediaRetentionHours ?? 48;
-    const retentionMs = targetRetentionHours * 60 * 60 * 1000;
-    const cutoffTime = Date.now() - retentionMs;
+  public static async processInboundMedia(
+    sessionId: string,
+    msg: proto.IWebMessageInfo,
+    sock?: WASocket,
+    baileysLogger?: any
+  ): Promise<(InboundMediaMetadata & { fileName: string }) | null> {
+    return mediaService.processInboundMedia(msg, sessionId, sock, baileysLogger);
+  }
 
-    const result: MediaCleanupResult = {
-      success: true,
-      deletedFilesCount: 0,
-      prunedDirsCount: 0,
-      freedBytes: 0,
-      freedBytesFormatted: '0 B',
-      retentionHours: targetRetentionHours,
-      timestamp: new Date().toISOString(),
-    };
+  /**
+   * Automated cleanup routine for expired media files.
+   * Recursively traverses storage directories and removes files older than retentionDays.
+   * Also purges empty nested directories to keep the filesystem clean.
+   */
+  async runRetentionCleanup(retentionDaysOverride?: number): Promise<{
+    deletedCount: number;
+    freedBytes: number;
+    freedBytesFormatted: string;
+    prunedDirsCount: number;
+    success: boolean;
+  }> {
+    const days = retentionDaysOverride ?? this.getRetentionDays();
+    const baseDir = this.getBaseStorageDir();
+    defaultLogger.info(`[MediaCleanup] Running media retention cleanup (Retention: ${days} days)...`);
 
-    if (!fs.existsSync(this.storageRoot)) {
+    let deletedCount = 0;
+    let freedBytes = 0;
+    let prunedDirsCount = 0;
+    const now = Date.now();
+    const maxAgeMs = days * 24 * 60 * 60 * 1000;
+
+    if (!fs.existsSync(baseDir)) {
       try {
-        await fs.promises.mkdir(this.storageRoot, { recursive: true });
+        await fsPromises.mkdir(baseDir, { recursive: true });
       } catch {
         // Ignore
       }
-      return result;
+      return {
+        deletedCount: 0,
+        freedBytes: 0,
+        freedBytesFormatted: '0 B',
+        prunedDirsCount: 0,
+        success: true,
+      };
     }
 
     if (isCleanupInProgress) {
-      logger.debug('[MediaCleanup] Cleanup already in progress, skipping concurrent run');
-      return result;
+      defaultLogger.debug('[MediaCleanup] Cleanup already in progress, skipping concurrent run');
+      return {
+        deletedCount: 0,
+        freedBytes: 0,
+        freedBytesFormatted: '0 B',
+        prunedDirsCount: 0,
+        success: true,
+      };
     }
 
     isCleanupInProgress = true;
+
     try {
-      const rootEntries = await fs.promises.readdir(this.storageRoot, { withFileTypes: true });
+      const traverseAndClean = async (dir: string): Promise<boolean> => {
+        let entries: fs.Dirent[] = [];
+        try {
+          entries = await fsPromises.readdir(dir, { withFileTypes: true });
+        } catch (err) {
+          return false;
+        }
 
-      for (const entry of rootEntries) {
-        const fullPath = path.join(this.storageRoot, entry.name);
+        let remainingChildren = entries.length;
 
-        if (entry.isDirectory()) {
-          const sessionDir = fullPath;
-          try {
-            const files = await fs.promises.readdir(sessionDir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
 
-            for (const fileEntry of files) {
-              const filePath = path.join(sessionDir, fileEntry.name);
-
+          if (entry.isDirectory()) {
+            const isChildEmpty = await traverseAndClean(fullPath);
+            if (isChildEmpty) {
               try {
-                const stat = await fs.promises.stat(filePath);
-                if (stat.isFile()) {
-                  const fileAgeMs = Date.now() - stat.mtimeMs;
-                  if (stat.mtimeMs < cutoffTime) {
-                    await fs.promises.unlink(filePath);
-                    result.deletedFilesCount++;
-                    result.freedBytes += stat.size;
-                    logger.debug(
-                      {
-                        filePath,
-                        fileAgeHours: Math.round(fileAgeMs / (1000 * 60 * 60)),
-                        size: stat.size,
-                      },
-                      '[MediaCleanup] Deleted expired media file'
-                    );
-                  }
-                }
-              } catch (fileErr: any) {
-                logger.warn(
-                  { filePath, err: fileErr.message },
-                  '[MediaCleanup] Error checking/deleting file'
+                await fsPromises.rmdir(fullPath);
+                prunedDirsCount++;
+                remainingChildren--;
+                defaultLogger.debug({ dir: fullPath }, '[MediaCleanup] Pruned empty directory');
+              } catch (rmDirErr: any) {
+                defaultLogger.debug({ dir: fullPath, err: rmDirErr.message }, '[MediaCleanup] Note on rmdir');
+              }
+            }
+          } else if (entry.isFile()) {
+            try {
+              const stats = await fsPromises.stat(fullPath);
+              if (now - stats.mtimeMs >= maxAgeMs) {
+                await fsPromises.unlink(fullPath);
+                deletedCount++;
+                freedBytes += stats.size;
+                remainingChildren--;
+                defaultLogger.debug(
+                  { fullPath, ageMs: now - stats.mtimeMs, size: stats.size },
+                  '[MediaCleanup] Deleted expired media file'
                 );
               }
+            } catch (err: any) {
+              defaultLogger.warn({ fullPath, err: err.message }, '[MediaCleanup] Error checking/deleting file');
             }
-
-            // Check if session directory is now empty and can be pruned
-            const remainingFiles = await fs.promises.readdir(sessionDir);
-            if (remainingFiles.length === 0) {
-              try {
-                await fs.promises.rmdir(sessionDir);
-                result.prunedDirsCount++;
-                logger.debug({ sessionDir }, '[MediaCleanup] Pruned empty session directory');
-              } catch (rmDirErr: any) {
-                logger.debug({ sessionDir, err: rmDirErr.message }, '[MediaCleanup] Note on rmdir');
-              }
-            }
-          } catch (dirErr: any) {
-            logger.warn(
-              { sessionDir, err: dirErr.message },
-              '[MediaCleanup] Error reading session directory'
-            );
-          }
-        } else if (entry.isFile()) {
-          // Loose file in root storage/media
-          try {
-            const stat = await fs.promises.stat(fullPath);
-            if (stat.mtimeMs < cutoffTime) {
-              await fs.promises.unlink(fullPath);
-              result.deletedFilesCount++;
-              result.freedBytes += stat.size;
-            }
-          } catch {
-            // Ignore
           }
         }
-      }
 
-      result.freedBytesFormatted = formatBytes(result.freedBytes);
+        // Return true if directory is now empty and not the root storage dir itself
+        return remainingChildren === 0 && dir !== baseDir;
+      };
 
-      logger.info(
-        {
-          deletedFiles: result.deletedFilesCount,
-          prunedDirs: result.prunedDirsCount,
-          freed: result.freedBytesFormatted,
-          retentionHours: targetRetentionHours,
-        },
-        '[MediaCleanup] Media storage retention cleanup finished'
+      await traverseAndClean(baseDir);
+
+      const freedBytesFormatted = formatBytes(freedBytes);
+      defaultLogger.info(
+        `[MediaCleanup] Retention cleanup completed. Total expired files purged: ${deletedCount} (${freedBytesFormatted} freed, ${prunedDirsCount} empty directories pruned)`
       );
 
-      return result;
+      return {
+        deletedCount,
+        freedBytes,
+        freedBytesFormatted,
+        prunedDirsCount,
+        success: true,
+      };
     } catch (err: any) {
-      logger.error({ err: err.message }, '[MediaCleanup] Error executing media storage cleanup');
-      result.success = false;
-      result.freedBytesFormatted = formatBytes(result.freedBytes);
-      return result;
+      defaultLogger.error({ err: err.message }, '[MediaCleanup] Error during media retention cleanup');
+      return {
+        deletedCount,
+        freedBytes,
+        freedBytesFormatted: formatBytes(freedBytes),
+        prunedDirsCount,
+        success: false,
+      };
     } finally {
       isCleanupInProgress = false;
     }
   }
+
+  /**
+   * Static alias for retention cleanup.
+   */
+  public static async cleanStorage(retentionHours?: number): Promise<MediaCleanupResult> {
+    const days = retentionHours ? retentionHours / 24 : undefined;
+    const result = await mediaService.runRetentionCleanup(days);
+    return {
+      success: result.success,
+      deletedFilesCount: result.deletedCount,
+      prunedDirsCount: result.prunedDirsCount,
+      freedBytes: result.freedBytes,
+      freedBytesFormatted: result.freedBytesFormatted,
+      retentionHours: retentionHours ?? config.mediaRetentionHours ?? 48,
+      timestamp: new Date().toISOString(),
+    };
+  }
 }
+
+export const mediaService = new MediaService();

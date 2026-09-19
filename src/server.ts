@@ -15,6 +15,7 @@ import swaggerPlugin from './plugins/swagger.plugin.js';
 import { apiRoutes } from './routes/api.routes.js';
 import { getDashboardHtml, uiRoutes } from './routes/ui.routes.js';
 import { sessionService } from './services/session.service.js';
+import { mediaService } from './services/media.service.js';
 import { DbService } from './services/db.service.js';
 import { initMessageWorker, closeMessageWorker } from './queues/message.worker.js';
 import { messageQueue, redisConnection } from './queues/message.queue.js';
@@ -57,7 +58,7 @@ export async function buildServer() {
   });
 
   // 2. Ensure media storage directory exists & register static media server
-  const mediaStorageDir = path.resolve(process.cwd(), 'storage/media');
+  const mediaStorageDir = path.resolve(process.env.STORAGE_DIR || './storage/media');
   if (!fs.existsSync(mediaStorageDir)) {
     try {
       fs.mkdirSync(mediaStorageDir, { recursive: true });
@@ -69,7 +70,7 @@ export async function buildServer() {
   await fastify.register(fastifyStatic, {
     root: mediaStorageDir,
     prefix: '/media/',
-    decorateReply: true,
+    decorateReply: false, // Prevent clash if public/ is already served
     index: false,
     list: false,
   });
@@ -129,6 +130,20 @@ export async function startServer() {
 
     // Start background automated media storage cleanup worker
     startMediaCleanupWorker();
+
+    // Run media retention cleanup periodically (every 24 hours)
+    const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000;
+    const mediaCleanupInterval = setInterval(() => {
+      mediaService.runRetentionCleanup().catch((err) => {
+        logger.error({ err }, 'Periodic media cleanup encountered an error');
+      });
+    }, CLEANUP_INTERVAL);
+    if (mediaCleanupInterval.unref) {
+      mediaCleanupInterval.unref();
+    }
+
+    // Trigger initial media retention cleanup
+    mediaService.runRetentionCleanup().catch(() => {});
 
     // Initialize BullMQ Anti-Ban Outbound Message Worker
     try {
