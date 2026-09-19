@@ -142,23 +142,29 @@ export function clearLogFeed() {
   showToast('Log feed buffer cleared');
 }
 
-export function renderLogs() {
-  const feed = document.getElementById('logs-feed');
-  const counter = document.getElementById('log-counter');
-  const autoscroll = document.getElementById('log-autoscroll') ? document.getElementById('log-autoscroll').checked : true;
-  const sessionFilter = document.getElementById('log-filter-session') ? document.getElementById('log-filter-session').value.trim().toLowerCase() : '';
-
-  if (!feed) return;
-
+export function getFilteredLogs() {
   let filtered = cachedLogsList;
 
   if (currentLogLevelFilter !== 'all') {
     filtered = filtered.filter(l => (l.level || '').toLowerCase() === currentLogLevelFilter);
   }
 
+  const sessionFilter = document.getElementById('log-filter-session') ? document.getElementById('log-filter-session').value.trim().toLowerCase() : '';
   if (sessionFilter) {
     filtered = filtered.filter(l => (l.sessionId || '').toLowerCase().includes(sessionFilter));
   }
+
+  return filtered;
+}
+
+export function renderLogs() {
+  const feed = document.getElementById('logs-feed');
+  const counter = document.getElementById('log-counter');
+  const autoscroll = document.getElementById('log-autoscroll') ? document.getElementById('log-autoscroll').checked : true;
+
+  if (!feed) return;
+
+  const filtered = getFilteredLogs();
 
   if (counter) counter.textContent = `${filtered.length} logs captured`;
 
@@ -190,14 +196,27 @@ export function renderLogs() {
 
     return `
       <div class="p-2.5 rounded-xl bg-zinc-950/90 border border-zinc-900/90 hover:border-zinc-800 transition-colors space-y-1.5">
-        <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
           <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
             <span class="px-1.5 py-0.2 rounded text-[10px] uppercase font-bold border ${badgeColor}">
               ${escapeHtml(lvl)}
             </span>
             ${log.sessionId ? `<span class="px-1.5 py-0.2 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-800/40 text-[10px] font-mono truncate max-w-[120px]">[${escapeHtml(log.sessionId)}]</span>` : ''}
           </div>
-          <span class="text-[10px] text-zinc-500 font-mono flex-shrink-0" title="${escapeHtml(clockTime)}">${escapeHtml(relTime)}</span>
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <span class="text-[10px] text-zinc-500 font-mono" title="${escapeHtml(clockTime)}">${escapeHtml(relTime)}</span>
+            <div class="flex items-center gap-1">
+              <button type="button" onclick="window.copyLogMessage(event, ${index})" class="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 cursor-pointer transition" title="Copy message text">
+                Msg
+              </button>
+              <button type="button" onclick="window.copyLogLine(event, ${index})" class="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 cursor-pointer transition" title="Copy formatted log line">
+                Line
+              </button>
+              <button type="button" onclick="window.copyLogEntry(event, ${index})" class="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 cursor-pointer transition" title="Copy log JSON object">
+                JSON
+              </button>
+            </div>
+          </div>
         </div>
 
         <div class="text-zinc-200 text-xs font-mono break-words leading-relaxed">${escapeHtml(stripAnsi(log.message))}</div>
@@ -209,7 +228,7 @@ export function renderLogs() {
                 <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
                 <span>Inspect Metadata</span>
               </span>
-              <button type="button" onclick="window.copyLogMeta(event, ${index})" class="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.2 rounded bg-zinc-800 hover:bg-zinc-700">
+              <button type="button" onclick="window.copyLogMeta(event, ${index})" class="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.2 rounded bg-zinc-800 hover:bg-zinc-700 cursor-pointer">
                 Copy Meta
               </button>
             </summary>
@@ -223,6 +242,91 @@ export function renderLogs() {
   if (autoscroll) {
     feed.scrollTop = 0;
   }
+}
+
+export function copyAllLogs(format = 'text') {
+  const filtered = getFilteredLogs();
+  if (!filtered || filtered.length === 0) {
+    showToast('No logs available to copy', 'error');
+    return;
+  }
+
+  let textToCopy = '';
+  if (format === 'json') {
+    textToCopy = JSON.stringify(filtered, null, 2);
+  } else {
+    textToCopy = filtered.map(log => {
+      const ts = log.timestamp || new Date().toISOString();
+      const lvl = (log.level || 'info').toUpperCase();
+      const sess = log.sessionId ? `[${log.sessionId}] ` : '';
+      const msg = stripAnsi(log.message || '');
+      const meta = log.meta && Object.keys(log.meta).length > 0 ? ` ${JSON.stringify(log.meta)}` : '';
+      return `[${ts}] [${lvl}] ${sess}${msg}${meta}`;
+    }).join('\n');
+  }
+
+  navigator.clipboard.writeText(textToCopy).then(() => {
+    showToast(`Copied ${filtered.length} log(s) to clipboard (${format.toUpperCase()})`);
+  }).catch(() => {
+    showToast('Failed to copy logs', 'error');
+  });
+}
+
+export function copyLogEntry(event, index) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  const filtered = getFilteredLogs();
+  const log = filtered[index];
+  if (!log) return;
+
+  const textToCopy = JSON.stringify(log, null, 2);
+  navigator.clipboard.writeText(textToCopy).then(() => {
+    showToast('Log entry JSON copied');
+  }).catch(() => {
+    showToast('Failed to copy', 'error');
+  });
+}
+
+export function copyLogMessage(event, index) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  const filtered = getFilteredLogs();
+  const log = filtered[index];
+  if (!log) return;
+
+  const msg = stripAnsi(log.message || '');
+  navigator.clipboard.writeText(msg).then(() => {
+    showToast('Log message text copied');
+  }).catch(() => {
+    showToast('Failed to copy', 'error');
+  });
+}
+
+export function copyLogLine(event, index) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  const filtered = getFilteredLogs();
+  const log = filtered[index];
+  if (!log) return;
+
+  const ts = log.timestamp || new Date().toISOString();
+  const lvl = (log.level || 'info').toUpperCase();
+  const sess = log.sessionId ? `[${log.sessionId}] ` : '';
+  const msg = stripAnsi(log.message || '');
+  const meta = log.meta && Object.keys(log.meta).length > 0 ? ` ${JSON.stringify(log.meta)}` : '';
+  const line = `[${ts}] [${lvl}] ${sess}${msg}${meta}`;
+
+  navigator.clipboard.writeText(line).then(() => {
+    showToast('Formatted log line copied');
+  }).catch(() => {
+    showToast('Failed to copy', 'error');
+  });
 }
 
 export function copyLogMeta(event, index) {
