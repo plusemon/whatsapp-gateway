@@ -4,6 +4,7 @@
  */
 import { SystemApi } from '../api.js';
 import { escapeHtml, getRelativeTime, showToast } from './ui.js';
+import { createEventNode } from '../components/eventNode.js';
 
 // State variables
 let currentStreamTab = 'logs'; // 'logs' | 'events'
@@ -15,6 +16,10 @@ let sseEventSource = null;
 let streamPaused = false;
 let currentEventFilter = 'all';
 let cachedEventsList = [];
+const expandedEventIds = new Set();
+let isInitialEventsRender = true;
+let isUserScrolledUpEvents = false;
+let autoScrollEventsListenerAttached = false;
 
 function stripAnsi(str) {
   if (!str) return '';
@@ -377,17 +382,64 @@ export async function triggerMediaCleanup() {
 /**
  * Gateway Events Feed
  */
+
+/**
+ * Checks whether the events container is scrolled near the bottom within threshold.
+ * @param {HTMLElement} container 
+ * @param {number} threshold 
+ * @returns {boolean}
+ */
+export function isEventsNearBottom(container, threshold = 80) {
+  if (!container) return true;
+  return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+}
+
+/**
+ * Binds user-aware scroll listeners to pause/resume auto-scrolling intelligently.
+ */
+function ensureEventsScrollListeners() {
+  if (autoScrollEventsListenerAttached) return;
+  const feed = document.getElementById('events-feed');
+  const autoscrollCheckbox = document.getElementById('stream-autoscroll');
+  if (!feed) return;
+
+  autoScrollEventsListenerAttached = true;
+
+  feed.addEventListener('scroll', () => {
+    if (isEventsNearBottom(feed, 80)) {
+      isUserScrolledUpEvents = false;
+      if (autoscrollCheckbox && !autoscrollCheckbox.checked) {
+        autoscrollCheckbox.checked = true;
+      }
+    } else {
+      // User manually scrolled up to inspect earlier logs
+      isUserScrolledUpEvents = true;
+    }
+  }, { passive: true });
+
+  if (autoscrollCheckbox) {
+    autoscrollCheckbox.addEventListener('change', () => {
+      if (autoscrollCheckbox.checked) {
+        isUserScrolledUpEvents = false;
+        feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' });
+      } else {
+        isUserScrolledUpEvents = true;
+      }
+    });
+  }
+}
+
 export function toggleStreamPause() {
   streamPaused = !streamPaused;
   const btn = document.getElementById('btn-stream-pause');
   if (btn) {
     if (streamPaused) {
       btn.textContent = 'Resume';
-      btn.className = 'px-3.5 py-1 text-xs rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 transition cursor-pointer';
+      btn.className = 'px-3.5 py-1 text-xs rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 transition cursor-pointer min-h-[32px]';
       showToast('Event stream paused');
     } else {
       btn.textContent = 'Pause';
-      btn.className = 'px-3.5 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer';
+      btn.className = 'px-3.5 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer min-h-[32px]';
       fetchEvents();
     }
   }
@@ -395,6 +447,7 @@ export function toggleStreamPause() {
 
 export function clearEventFeed() {
   cachedEventsList = [];
+  expandedEventIds.clear();
   renderEvents();
   showToast('Event feed cleared');
 }
@@ -411,135 +464,213 @@ export function setEventFilter(filter) {
   renderEvents();
 }
 
+export function filterEventsChanged() {
+  renderEvents();
+}
+
 export async function fetchEvents() {
   if (streamPaused) return;
   const data = await SystemApi.getRecentEvents();
-  if (!data || !data.events) return;
+  if (!data || !Array.isArray(data.events)) return;
   cachedEventsList = data.events;
   renderEvents();
 }
 
+/**
+ * Returns filtered and chronologically ordered events.
+ * @returns {Array<Object>}
+ */
+export function getFilteredEvents() {
+  // Sort chronologically (ascending: oldest -> newest) so new arrivals append to the bottom
+  const sorted = [...cachedEventsList].sort((a, b) => {
+    const tA = typeof a.timestamp === 'number' ? a.timestamp : new Date(a.timestamp).getTime();
+    const tB = typeof b.timestamp === 'number' ? b.timestamp : new Date(b.timestamp).getTime();
+    return tA - tB;
+  });
+
+  let filtered = sorted;
+  if (currentEventFilter === 'inbound_message') {
+    filtered = sorted.filter(e => (e.type || '').includes('inbound'));
+  } else if (currentEventFilter === 'outbound_message') {
+    filtered = sorted.filter(e => (e.type || '').includes('outbound'));
+  } else if (currentEventFilter === 'message_ack') {
+    filtered = sorted.filter(e => e.type === 'message_ack');
+  } else if (currentEventFilter === 'webhook') {
+    filtered = sorted.filter(e => (e.type || '').includes('webhook'));
+  } else if (currentEventFilter === 'session_event') {
+    filtered = sorted.filter(e => (e.type || '').includes('session'));
+  }
+
+  const sessionInput = document.getElementById('event-filter-session');
+  const sessionQuery = sessionInput ? sessionInput.value.trim().toLowerCase() : '';
+  if (sessionQuery) {
+    filtered = filtered.filter(e =>
+      (e.sessionId || '').toLowerCase().includes(sessionQuery) ||
+      (e.type || '').toLowerCase().includes(sessionQuery) ||
+      JSON.stringify(e.details || {}).toLowerCase().includes(sessionQuery)
+    );
+  }
+
+  return filtered;
+}
+
+/**
+ * Non-destructively renders gateway events using insertAdjacentElement.
+ * Preserves expanded details drawers, user scroll position, and avoids full DOM thrashing.
+ */
 export function renderEvents() {
   const feed = document.getElementById('events-feed');
   const counter = document.getElementById('stream-counter');
-  const autoscroll = document.getElementById('stream-autoscroll') ? document.getElementById('stream-autoscroll').checked : true;
+  const autoscrollCheckbox = document.getElementById('stream-autoscroll');
 
   if (!feed) return;
+  ensureEventsScrollListeners();
 
-  let filtered = cachedEventsList;
-  if (currentEventFilter === 'inbound_message') {
-    filtered = cachedEventsList.filter(e => e.type.includes('inbound'));
-  } else if (currentEventFilter === 'outbound_message') {
-    filtered = cachedEventsList.filter(e => e.type.includes('outbound'));
-  } else if (currentEventFilter === 'message_ack') {
-    filtered = cachedEventsList.filter(e => e.type === 'message_ack');
-  } else if (currentEventFilter === 'webhook') {
-    filtered = cachedEventsList.filter(e => e.type.includes('webhook'));
-  } else if (currentEventFilter === 'session_event') {
-    filtered = cachedEventsList.filter(e => e.type.includes('session'));
+  const filtered = getFilteredEvents();
+
+  if (counter) {
+    counter.textContent = `${filtered.length} events logged`;
   }
-
-  if (counter) counter.textContent = `${filtered.length} events logged`;
 
   if (filtered.length === 0) {
     feed.innerHTML = `
-      <div class="text-zinc-600 text-center py-12 text-xs">
+      <div id="events-empty-placeholder" class="text-zinc-600 text-center py-12 text-xs">
         No events matching '${escapeHtml(currentEventFilter)}'.
       </div>
     `;
     return;
   }
 
-  feed.innerHTML = filtered.slice(0, 40).map((ev, index) => {
-    let badgeColor = 'bg-zinc-800 text-zinc-300 border-zinc-700';
-    let typeIcon = '⚡';
+  // Remove empty placeholder if present
+  const placeholder = document.getElementById('events-empty-placeholder');
+  if (placeholder) {
+    placeholder.remove();
+  }
 
-    if (ev.type === 'inbound_message') {
-      badgeColor = 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30';
-      typeIcon = '📥';
-    } else if (ev.type === 'outbound_message') {
-      badgeColor = 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
-      typeIcon = '📤';
-    } else if (ev.type === 'message_ack') {
-      badgeColor = 'bg-teal-500/15 text-teal-300 border-teal-500/30';
-      typeIcon = '📬';
-    } else if (ev.type === 'webhook_dispatched') {
-      badgeColor = 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30';
-      typeIcon = '🔗';
-    } else if (ev.type === 'webhook_failed') {
-      badgeColor = 'bg-rose-500/15 text-rose-400 border-rose-500/30';
-      typeIcon = '❌';
-    } else if (ev.type === 'session_event') {
-      badgeColor = 'bg-amber-500/15 text-amber-400 border-amber-500/30';
-      typeIcon = '⚙️';
+  // Map existing rendered nodes by data-event-id
+  const existingElements = new Map();
+  for (const child of Array.from(feed.children)) {
+    const id = child.getAttribute('data-event-id');
+    if (id) {
+      existingElements.set(id, child);
     }
+  }
 
-    const relTime = getRelativeTime(ev.timestamp);
-    const clockTime = new Date(ev.timestamp).toLocaleTimeString();
-    const jsonString = JSON.stringify(ev.details || {}, null, 2);
+  // Active event IDs in this render pass
+  const activeIds = new Set(filtered.map(e => e.id || `${e.type}_${e.timestamp}`));
 
-    let summary = '';
-    if (ev.details) {
-      if (ev.type === 'message_ack') {
-        summary = `ACK: ${ev.details.statusLabel || 'Status ' + ev.details.status} (${ev.details.remoteJid || 'Target'}) · Msg: ${ev.details.messageId || 'N/A'}`;
-      } else if (ev.details.text) {
-        summary = ev.details.text;
-      } else if (ev.details.status) {
-        summary = `Status changed to ${ev.details.status}`;
-      } else if (ev.details.mediaType) {
-        summary = `Media: ${ev.details.mediaType}`;
-      } else if (ev.details.message) {
-        summary = ev.details.message;
+  // 1. Remove stale nodes no longer matching the filter
+  for (const [id, child] of existingElements.entries()) {
+    if (!activeIds.has(id)) {
+      child.remove();
+      existingElements.delete(id);
+    }
+  }
+
+  // 2. Non-destructively append or insert new nodes preserving existing ones
+  let hasNewAppends = false;
+  let prevNode = null;
+
+  for (let i = 0; i < filtered.length; i++) {
+    const ev = filtered[i];
+    const eventId = ev.id || `${ev.type}_${ev.timestamp}`;
+    let node = existingElements.get(eventId);
+
+    if (!node) {
+      // Create new event node
+      node = createEventNode(ev, {
+        isExpanded: expandedEventIds.has(eventId),
+        onToggleExpanded: (id, open) => {
+          if (open) expandedEventIds.add(id);
+          else expandedEventIds.delete(id);
+        },
+      });
+      hasNewAppends = true;
+
+      if (!prevNode) {
+        feed.insertAdjacentElement('afterbegin', node);
       } else {
-        summary = JSON.stringify(ev.details).substring(0, 60);
+        prevNode.insertAdjacentElement('afterend', node);
+      }
+      existingElements.set(eventId, node);
+    } else {
+      // Node already exists in DOM - preserve its state untouched!
+      // Only verify relative order
+      if (prevNode && node.previousElementSibling !== prevNode) {
+        prevNode.insertAdjacentElement('afterend', node);
       }
     }
 
-    return `
-      <div class="p-3 rounded-xl bg-zinc-950/80 border border-zinc-900/90 hover:border-zinc-800 transition-colors space-y-1.5">
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex items-center gap-1.5 min-w-0">
-            <span class="text-xs">${typeIcon}</span>
-            <span class="px-2 py-0.5 rounded-md text-[10px] font-mono border font-semibold ${badgeColor}">
-              ${escapeHtml(ev.type)}
-            </span>
-            ${ev.sessionId ? `<span class="text-[10px] font-mono text-zinc-400 truncate max-w-[100px]">[${escapeHtml(ev.sessionId)}]</span>` : ''}
-          </div>
+    prevNode = node;
+  }
 
-          <span class="text-[10px] text-zinc-500 font-mono flex-shrink-0" title="${escapeHtml(clockTime)}">${escapeHtml(relTime)}</span>
-        </div>
-
-        ${summary ? `<div class="text-zinc-300 text-xs truncate font-sans">${escapeHtml(summary)}</div>` : ''}
-
-        <details class="group">
-          <summary class="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer flex items-center justify-between font-mono select-none pt-1">
-            <span class="flex items-center gap-1">
-              <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-              <span>JSON Payload</span>
-            </span>
-            <button type="button" onclick="window.copyEventPayload(event, ${index})" class="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700">
-              Copy
-            </button>
-          </summary>
-          <pre id="event-json-${index}" class="mt-1.5 p-2 rounded-lg bg-black/70 border border-zinc-900 text-[10px] text-zinc-300 overflow-x-auto font-mono whitespace-pre max-h-36 overflow-y-auto">${escapeHtml(jsonString)}</pre>
-        </details>
-      </div>
-    `;
-  }).join('');
-
-  if (autoscroll) {
-    feed.scrollTop = 0;
+  // 3. Intelligent User-Aware Auto-Scroll
+  const shouldAutoScroll = autoscrollCheckbox ? autoscrollCheckbox.checked : true;
+  if (isInitialEventsRender) {
+    isInitialEventsRender = false;
+    if (shouldAutoScroll) {
+      feed.scrollTop = feed.scrollHeight;
+    }
+  } else if (hasNewAppends && shouldAutoScroll && !isUserScrolledUpEvents && isEventsNearBottom(feed, 80)) {
+    feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' });
   }
 }
 
+/**
+ * Copies the entire currently visible stream of filtered events to clipboard.
+ * @param {Event} [e] 
+ */
+export function copyAllEvents(e) {
+  if (e) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
+
+  const filtered = getFilteredEvents();
+  if (!filtered || filtered.length === 0) {
+    showToast('No events available to copy', 'warn');
+    return;
+  }
+
+  const textToCopy = filtered.map(ev => {
+    const ts = new Date(ev.timestamp).toISOString();
+    const type = (ev.type || 'EVENT').toUpperCase();
+    const sess = ev.sessionId ? `[${ev.sessionId}] ` : '';
+    const detailsStr = typeof ev.details === 'object' ? JSON.stringify(ev.details) : String(ev.details || '');
+    return `[${ts}] [${type}] ${sess}${detailsStr}`;
+  }).join('\n');
+
+  navigator.clipboard.writeText(textToCopy).then(() => {
+    const btn = document.getElementById('btn-copy-all-events');
+    const label = document.getElementById('btn-copy-all-events-text');
+    if (label) label.textContent = 'Copied!';
+    if (btn) btn.classList.add('text-emerald-400', 'border-emerald-500/40');
+
+    setTimeout(() => {
+      if (label) label.textContent = 'Copy All';
+      if (btn) btn.classList.remove('text-emerald-400', 'border-emerald-500/40');
+    }, 1500);
+
+    showToast(`Copied ${filtered.length} event(s) to clipboard`);
+  }).catch((err) => {
+    console.warn('Failed to copy events:', err);
+    showToast('Clipboard copy failed', 'error');
+  });
+}
+
+/**
+ * Backward compatibility stub for legacy index-based callers
+ */
 export function copyEventPayload(event, index) {
   if (event) {
     event.stopPropagation();
     event.preventDefault();
   }
-  const el = document.getElementById(`event-json-${index}`);
-  if (!el) return;
-  navigator.clipboard.writeText(el.textContent).then(() => {
+  const filtered = getFilteredEvents();
+  const ev = filtered[index];
+  if (!ev) return;
+  const text = JSON.stringify(ev.details || ev, null, 2);
+  navigator.clipboard.writeText(text).then(() => {
     showToast('Payload copied to clipboard');
   }).catch(() => {
     showToast('Failed to copy', 'error');

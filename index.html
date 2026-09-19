@@ -493,11 +493,25 @@
               <button onclick="window.setEventFilter('inbound_message')" data-filter="inbound_message" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Inbound</button>
               <button onclick="window.setEventFilter('outbound_message')" data-filter="outbound_message" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Outbound</button>
               <button onclick="window.setEventFilter('message_ack')" data-filter="message_ack" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">ACKs</button>
+              <button onclick="window.setEventFilter('webhook')" data-filter="webhook" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Webhooks</button>
+              <button onclick="window.setEventFilter('session_event')" data-filter="session_event" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Sessions</button>
             </div>
-            <div class="flex items-center gap-2">
-              <button id="btn-stream-pause" onclick="window.toggleStreamPause()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer">Pause</button>
-              <button onclick="window.clearEventFeed()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer">Clear</button>
+            <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              <button id="btn-copy-all-events" onclick="window.copyAllEvents(event)" class="px-3 py-1 text-xs rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 transition cursor-pointer flex items-center gap-1.5 min-h-[32px]" title="Copy all visible event payloads formatted with timestamps">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
+                <span id="btn-copy-all-events-text">Copy All</span>
+              </button>
+              <button id="btn-stream-pause" onclick="window.toggleStreamPause()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer min-h-[32px]">Pause</button>
+              <button onclick="window.clearEventFeed()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer min-h-[32px]">Clear</button>
             </div>
+          </div>
+
+          <div class="flex items-center justify-between gap-2">
+            <input type="text" id="event-filter-session" oninput="window.filterEventsChanged()" placeholder="Filter events by session or type..." class="w-full input-base px-3 py-1.5 rounded-lg text-xs font-mono placeholder:text-zinc-600">
+            <label class="flex items-center gap-1.5 text-xs text-zinc-400 select-none whitespace-nowrap cursor-pointer">
+              <input type="checkbox" id="stream-autoscroll" checked class="rounded bg-zinc-800 border-zinc-700 text-emerald-500 focus:ring-0">
+              <span id="stream-autoscroll-label">Auto-scroll</span>
+            </label>
           </div>
 
           <div id="events-feed" class="flex-1 bg-zinc-950/80 rounded-xl p-3 border border-zinc-900 overflow-y-auto max-h-[440px] space-y-2">

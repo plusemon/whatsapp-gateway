@@ -56,6 +56,7 @@ import {
 import {
   clearEventFeed,
   clearLogFeed,
+  copyAllEvents,
   copyAllLogs,
   copyEventPayload,
   copyLogEntry,
@@ -63,6 +64,7 @@ import {
   copyLogMessage,
   copyLogMeta,
   fetchEvents,
+  filterEventsChanged,
   filterLogsChanged,
   getFilteredLogs,
   initLogStreamSSE,
@@ -170,9 +172,11 @@ Object.assign(window, {
   toggleStreamPause,
   clearEventFeed,
   setEventFilter,
+  filterEventsChanged,
   fetchEvents,
   renderEvents,
   copyEventPayload,
+  copyAllEvents,
 
   // Webhook Settings
   loadWebhookSettings,
