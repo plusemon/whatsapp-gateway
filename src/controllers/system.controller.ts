@@ -32,6 +32,7 @@ export class SystemController {
         publicBaseUrl: getPublicBaseUrl(),
         redis: isUsingMockRedis() ? 'in-memory-fallback' : 'connected-redis',
         webhookUrl: config.botlaWebhookUrl,
+        webhookEnabled: config.webhookEnabled,
         activeSessions: sessionService.listSessions().length,
         protocolVersion: cachedVersion ? cachedVersion.version.join('.') : 'synced-on-demand',
         isLatestProtocol: cachedVersion ? cachedVersion.isLatest : true,

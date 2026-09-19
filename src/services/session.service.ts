@@ -140,7 +140,7 @@ export class SessionService {
 
       // Create pino sublogger for Baileys with minimal noise
       const baileysLogger = logger.child({ module: 'baileys', sessionId });
-      baileysLogger.level = 'warn';
+      baileysLogger.level = 'fatal';
 
       // Step B: Create WASocket instance with synchronized protocol version and standard browser signature
       const sock = makeWASocket({
@@ -267,7 +267,7 @@ export class SessionService {
             (errorMessage.includes('QR refs attempts ended') ||
               (!meta.user && (statusCode === DisconnectReason.timedOut || statusCode === 408) && (meta.status === 'qr_ready' || meta.status === 'connecting')));
 
-          const logMethod = isLoggedOut || (statusCode && statusCode >= 500) ? 'warn' : 'info';
+          const logMethod = isLoggedOut || (statusCode && statusCode >= 500 && statusCode !== 515) ? 'warn' : (statusCode === 515 ? 'debug' : (statusCode ? 'info' : 'debug'));
 
           sessionLog[logMethod](
             {

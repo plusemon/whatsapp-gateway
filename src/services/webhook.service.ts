@@ -19,6 +19,10 @@ export class WebhookService {
     const webhookUrl = config.botlaWebhookUrl;
     const sessionLog = payload.sessionId ? createSessionLogger(payload.sessionId) : logger;
 
+    if (!config.webhookEnabled) {
+      return false;
+    }
+
     if (!webhookUrl) {
       sessionLog.warn('[Webhook] No BOTLA_WEBHOOK_URL configured; skipping dispatch');
       return false;
@@ -30,6 +34,10 @@ export class WebhookService {
       'Content-Type': 'application/json',
       'User-Agent': 'Botla-WhatsApp-Gateway/1.0',
     };
+
+    if (config.webhookToken) {
+      headers['Authorization'] = `Bearer ${config.webhookToken}`;
+    }
 
     if (config.webhookSecret) {
       const signature = crypto
@@ -71,14 +79,19 @@ export class WebhookService {
 
       return true;
     } catch (err: any) {
-      sessionLog.error(
+      const isDefaultLocalUrl = webhookUrl.includes('127.0.0.1:8000') || webhookUrl.includes('localhost:8000');
+      const logMethod = isDefaultLocalUrl ? 'warn' : 'error';
+      const logMsg = isDefaultLocalUrl
+        ? `[Webhook] Laravel webhook receiver at ${webhookUrl} unreachable or returned error (${err.message}). Please verify BOTLA_WEBHOOK_URL and BOTLA_WEBHOOK_TOKEN.`
+        : '[Webhook] Failed to deliver payload to webhook';
+
+      sessionLog[logMethod](
         {
           event: eventName,
           url: webhookUrl,
           error: err.message,
-          stack: err.stack,
         },
-        '[Webhook] Failed to deliver payload to webhook'
+        logMsg
       );
 
       if (onDispatched) {

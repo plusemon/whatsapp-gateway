@@ -13,6 +13,8 @@ export interface GatewayConfig {
   redisUrl: string;
   botlaWebhookUrl: string;
   webhookSecret: string;
+  webhookToken: string;
+  webhookEnabled: boolean;
   apiKey: string;
   logLevel: string;
   logRetentionDays: number;
@@ -33,6 +35,8 @@ export const config: GatewayConfig = {
   redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
   botlaWebhookUrl: process.env.BOTLA_WEBHOOK_URL || 'http://127.0.0.1:8000/api/whatsapp/webhook',
   webhookSecret: process.env.WEBHOOK_SECRET || 'your_hmac_secret_here',
+  webhookToken: process.env.BOTLA_WEBHOOK_TOKEN || process.env.WEBHOOK_BEARER_TOKEN || '',
+  webhookEnabled: process.env.BOTLA_WEBHOOK_ENABLED === 'true' || process.env.WEBHOOK_ENABLED === 'true',
   apiKey: process.env.API_KEY || process.env.GATEWAY_API_KEY || '',
   logLevel: process.env.LOG_LEVEL || 'info',
   logRetentionDays: parseNumber(process.env.LOG_RETENTION_DAYS, 14),
