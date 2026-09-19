@@ -42,48 +42,73 @@ export function showToast(message, type = 'info') {
 }
 
 /**
- * Mobile responsive tab navigation switcher (< 1024px)
+ * Primary navigation switcher for both Desktop tabs and Mobile bottom navigation.
  * @param {'sessions'|'sender'|'stream'} tab 
  */
-export function switchMobileTab(tab) {
+export function switchTab(tab) {
   const panelSessions = document.getElementById('section-sessions');
   const panelSender = document.getElementById('section-sender');
   const panelStream = document.getElementById('section-stream');
 
-  const tabSessions = document.getElementById('mobile-tab-sessions');
-  const tabSender = document.getElementById('mobile-tab-sender');
-  const tabStream = document.getElementById('mobile-tab-stream');
+  const desktopSessions = document.getElementById('desktop-tab-sessions');
+  const desktopSender = document.getElementById('desktop-tab-sender');
+  const desktopStream = document.getElementById('desktop-tab-stream');
 
   const navSessions = document.getElementById('bottom-nav-sessions');
   const navSender = document.getElementById('bottom-nav-sender');
   const navStream = document.getElementById('bottom-nav-stream');
 
+  const tabSessions = document.getElementById('mobile-tab-sessions');
+  const tabSender = document.getElementById('mobile-tab-sender');
+  const tabStream = document.getElementById('mobile-tab-stream');
+
+  // Hide all sections
   [panelSessions, panelSender, panelStream].forEach(p => {
     if (p) p.classList.add('hidden');
   });
 
+  // Reset desktop tabs style
+  const desktopInactive = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer';
+  [desktopSessions, desktopSender, desktopStream].forEach(t => {
+    if (t) t.className = desktopInactive;
+  });
+
+  // Reset legacy mobile inline tabs style if present
   [tabSessions, tabSender, tabStream].forEach(t => {
     if (t) t.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer';
   });
 
-  [navSessions, navSender, navStream].forEach(n => {
-    if (n) n.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer relative';
+  // Reset bottom navigation items
+  [navSessions, navSender].forEach(n => {
+    if (n) n.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer';
   });
+  if (navStream) {
+    navStream.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer relative';
+  }
 
+  // Activate selected tab
   if (tab === 'sessions') {
     if (panelSessions) panelSessions.classList.remove('hidden');
+    if (desktopSessions) desktopSessions.className = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
     if (tabSessions) tabSessions.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
     if (navSessions) navSessions.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-emerald-400 transition cursor-pointer';
   } else if (tab === 'sender') {
     if (panelSender) panelSender.classList.remove('hidden');
+    if (desktopSender) desktopSender.className = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
     if (tabSender) tabSender.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
     if (navSender) navSender.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-indigo-400 transition cursor-pointer';
   } else if (tab === 'stream') {
     if (panelStream) panelStream.classList.remove('hidden');
+    if (desktopStream) desktopStream.className = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
     if (tabStream) tabStream.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
     if (navStream) navStream.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-cyan-400 transition cursor-pointer relative';
   }
 }
+
+/**
+ * Backwards compatibility alias for switchTab
+ */
+export const switchMobileTab = switchTab;
 
 /**
  * Checks system health & updates telemetry badges.

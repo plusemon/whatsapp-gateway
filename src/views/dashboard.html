@@ -7,12 +7,59 @@
   <meta name="description" content="Multi-tenant WhatsApp Web microservice with Baileys, Redis auth state, media pipeline, pairing code, and auto-restore.">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="/css/styles.css">
-</head>
-<body class="min-h-screen flex flex-col antialiased selection:bg-emerald-500/20 selection:text-emerald-300 pb-20 lg:pb-0">
+  <script>
+    // Immediate early registration for UI navigation to guarantee zero race-condition window errors
+    window.switchTab = function(tab) {
+      const panelSessions = document.getElementById('section-sessions');
+      const panelSender = document.getElementById('section-sender');
+      const panelStream = document.getElementById('section-stream');
 
-  <!-- Top Navigation Bar -->
+      const desktopSessions = document.getElementById('desktop-tab-sessions');
+      const desktopSender = document.getElementById('desktop-tab-sender');
+      const desktopStream = document.getElementById('desktop-tab-stream');
+
+      const navSessions = document.getElementById('bottom-nav-sessions');
+      const navSender = document.getElementById('bottom-nav-sender');
+      const navStream = document.getElementById('bottom-nav-stream');
+
+      const tabSessions = document.getElementById('mobile-tab-sessions');
+      const tabSender = document.getElementById('mobile-tab-sender');
+      const tabStream = document.getElementById('mobile-tab-stream');
+
+      [panelSessions, panelSender, panelStream].forEach(function(p) { if (p) p.classList.add('hidden'); });
+
+      var desktopInactive = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer';
+      [desktopSessions, desktopSender, desktopStream].forEach(function(t) { if (t) t.className = desktopInactive; });
+      [tabSessions, tabSender, tabStream].forEach(function(t) { if (t) t.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer'; });
+      [navSessions, navSender].forEach(function(n) { if (n) n.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer'; });
+      if (navStream) navStream.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer relative';
+
+      if (tab === 'sessions') {
+        if (panelSessions) panelSessions.classList.remove('hidden');
+        if (desktopSessions) desktopSessions.className = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
+        if (tabSessions) tabSessions.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
+        if (navSessions) navSessions.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-emerald-400 transition cursor-pointer';
+      } else if (tab === 'sender') {
+        if (panelSender) panelSender.classList.remove('hidden');
+        if (desktopSender) desktopSender.className = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
+        if (tabSender) tabSender.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
+        if (navSender) navSender.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-indigo-400 transition cursor-pointer';
+      } else if (tab === 'stream') {
+        if (panelStream) panelStream.classList.remove('hidden');
+        if (desktopStream) desktopStream.className = 'flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
+        if (tabStream) tabStream.className = 'flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer';
+        if (navStream) navStream.className = 'flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-cyan-400 transition cursor-pointer relative';
+      }
+    };
+    window.switchMobileTab = window.switchTab;
+  </script>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-emerald-500/20 selection:text-emerald-300 pb-28 md:pb-8">
+
+  <!-- Top Navigation & Header Bar -->
   <header class="sticky top-0 z-30 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-4 py-3">
     <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      <!-- App Brand Title -->
       <div class="flex items-center gap-3">
         <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-black font-bold shadow-lg shadow-emerald-900/30">
           <svg class="w-4 h-4 text-zinc-950" fill="currentColor" viewBox="0 0 24 24"><path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.312.045-.694.072-2.18-.544-1.748-.724-2.852-2.493-2.937-2.607-.087-.114-.712-.947-.712-1.808 0-.86.452-1.282.613-1.458.161-.176.353-.22.47-.22.118 0 .235.001.338.006.11.005.257-.042.402.308.15.362.511 1.246.557 1.337.045.09.076.196.015.316-.06.12-.09.195-.181.301-.09.106-.188.236-.269.317-.091.09-.187.189-.08.373.106.184.471.776 1.01 1.257.694.619 1.28.81 1.462.901.182.09.288.076.394-.045.106-.12.453-.527.574-.708.12-.18.241-.15.405-.09.164.06 1.041.491 1.22.581.18.09.3.136.345.211.046.076.046.438-.098.843z"/></svg>
@@ -30,20 +77,38 @@
         </div>
       </div>
 
-      <!-- Live Telemetry Badges -->
-      <div class="hidden sm:flex items-center gap-2 text-xs">
-        <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
-          <span id="redis-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
-          <span class="text-zinc-400">Redis:</span>
-          <span id="redis-status" class="text-emerald-400 font-mono font-medium">checking</span>
-        </div>
-        <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
-          <span class="text-zinc-400">WA Core:</span>
-          <span id="wa-version-status" class="text-emerald-400 font-medium">loading</span>
-        </div>
-        <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
-          <span class="text-zinc-400">Retention:</span>
-          <span id="media-status" class="text-zinc-300 font-mono">24h</span>
+      <!-- Desktop Inline Navigation Tabs (>= 768px ONLY) -->
+      <nav class="hidden md:flex items-center gap-1 p-1 bg-zinc-900/90 rounded-xl border border-zinc-800 text-xs font-semibold">
+        <button id="desktop-tab-sessions" onclick="window.switchTab('sessions')" class="flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer">
+          <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+          <span>Sessions</span>
+        </button>
+        <button id="desktop-tab-sender" onclick="window.switchTab('sender')" class="flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer">
+          <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+          <span>Console</span>
+        </button>
+        <button id="desktop-tab-stream" onclick="window.switchTab('stream')" class="flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer">
+          <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          <span>Live Logs</span>
+        </button>
+      </nav>
+
+      <!-- Live Telemetry Badges & Refresh -->
+      <div class="flex items-center gap-2 text-xs">
+        <div class="hidden sm:flex items-center gap-2">
+          <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
+            <span id="redis-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span class="text-zinc-400">Redis:</span>
+            <span id="redis-status" class="text-emerald-400 font-mono font-medium">checking</span>
+          </div>
+          <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
+            <span class="text-zinc-400">WA Core:</span>
+            <span id="wa-version-status" class="text-emerald-400 font-medium">loading</span>
+          </div>
+          <div class="px-2.5 py-1.5 rounded-xl card-surface flex items-center gap-2">
+            <span class="text-zinc-400">Retention:</span>
+            <span id="media-status" class="text-zinc-300 font-mono">24h</span>
+          </div>
         </div>
         <button onclick="window.manualRefreshAll()" class="p-2 rounded-xl card-surface hover:bg-zinc-800 text-zinc-300 hover:text-white transition active:scale-95 cursor-pointer" title="Refresh Telemetry & Sessions">
           <svg id="manual-refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
@@ -52,149 +117,262 @@
     </div>
   </header>
 
-  <!-- Mobile Segmented Navigation (< lg) -->
-  <div class="lg:hidden bg-zinc-950 border-b border-zinc-800/80 px-4 py-2 sticky top-[57px] z-20">
-    <div class="grid grid-cols-3 gap-1 p-1 bg-zinc-900 rounded-xl text-xs font-semibold">
-      <button id="mobile-tab-sessions" onclick="window.switchMobileTab('sessions')" class="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg bg-zinc-800 text-white shadow-sm transition active:scale-95 cursor-pointer">
-        <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-        <span>Sessions</span>
-      </button>
-      <button id="mobile-tab-sender" onclick="window.switchMobileTab('sender')" class="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer">
-        <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-        <span>Console</span>
-      </button>
-      <button id="mobile-tab-stream" onclick="window.switchMobileTab('stream')" class="flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-zinc-400 hover:text-zinc-200 transition active:scale-95 cursor-pointer">
-        <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-        <span>Live Logs</span>
-      </button>
-    </div>
-  </div>
+  <!-- Main Content Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
 
-  <!-- Main Multi-Column Container -->
-  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-    <!-- Column 1: Sessions Management -->
-    <section id="section-sessions" class="lg:col-span-4 space-y-6">
+    <!-- ========================================================================= -->
+    <!-- TAB 1: SESSIONS / BALANCED OPERATIONAL DASHBOARD OVERVIEW                -->
+    <!-- ========================================================================= -->
+    <section id="section-sessions" class="space-y-6">
       
-      <!-- New Session Boot Card -->
-      <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm">
-        <div class="flex items-center justify-between">
-          <h2 class="font-bold text-white text-sm flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span>Boot Tenant Session</span>
-          </h2>
-          <span class="text-[11px] text-zinc-500 font-mono">Multi-Tenant</span>
+      <!-- Top Overview Stats Ribbon -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="card-surface rounded-2xl p-3.5 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+          </div>
+          <div class="min-w-0">
+            <p class="text-[11px] text-zinc-400">Active Sockets</p>
+            <p id="sessions-total-count" class="text-base font-bold text-white font-mono leading-tight">0</p>
+          </div>
         </div>
 
-        <div class="space-y-3">
-          <div>
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Session Identifier (Tenant ID)</label>
-            <input type="text" id="new-session-id" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-sm font-mono placeholder:text-zinc-600" value="tenant-botla-1">
+        <div class="card-surface rounded-2xl p-3.5 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center flex-shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
           </div>
-
-          <div class="flex items-center gap-2">
-            <button onclick="window.setSessionInput('tenant-botla-1')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-400 hover:text-zinc-200 transition">tenant-1</button>
-            <button onclick="window.setSessionInput('tenant-botla-2')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-400 hover:text-zinc-200 transition">tenant-2</button>
-            <button onclick="window.setSessionInput('tenant-support')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-400 hover:text-zinc-200 transition">support</button>
+          <div class="min-w-0">
+            <p class="text-[11px] text-zinc-400">State Persistence</p>
+            <p class="text-xs font-semibold text-zinc-200 font-mono leading-tight truncate">Redis Adapter</p>
           </div>
+        </div>
 
-          <button id="btn-init-session" onclick="window.initSession()" class="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 cursor-pointer">
+        <div class="card-surface rounded-2xl p-3.5 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center flex-shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+          </div>
+          <div class="min-w-0">
+            <p class="text-[11px] text-zinc-400">Anti-Ban Presence</p>
+            <p class="text-xs font-semibold text-emerald-400 font-mono leading-tight">Human Emulation</p>
+          </div>
+        </div>
+
+        <div class="card-surface rounded-2xl p-3.5 flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center flex-shrink-0">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-            <span>Boot Session</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Active Sessions Pool Card -->
-      <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <h2 class="font-bold text-white text-sm">Active Sessions</h2>
-            <span id="sessions-count-badge" class="px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 text-xs font-mono font-medium">0</span>
           </div>
-          <button onclick="window.loadSessions()" class="text-xs text-zinc-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-            <span>Sync</span>
-          </button>
-        </div>
-
-        <div id="sessions-container" class="space-y-3">
-          <div class="p-8 text-center text-zinc-500 text-sm">Loading active sessions...</div>
+          <div class="min-w-0">
+            <p class="text-[11px] text-zinc-400">Gateway Status</p>
+            <p class="text-xs font-semibold text-emerald-400 font-mono leading-tight flex items-center gap-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Online</span>
+            </p>
+          </div>
         </div>
       </div>
 
-      <!-- Webhook Relay Card -->
-      <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-3 shadow-sm">
-        <div class="flex items-center justify-between">
-          <h2 class="font-bold text-white text-xs flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
-            <span>HMAC Webhook Relay Target</span>
-          </h2>
-          <span class="text-[10px] px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">SHA256</span>
+      <!-- Dashboard Modules Bento Layout -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        
+        <!-- Left Column (lg:col-span-5): Boot Tenant Session & HMAC Webhook Relay Target -->
+        <div class="lg:col-span-5 space-y-6">
+          
+          <!-- Module 1: Boot Tenant Session Form -->
+          <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm">
+            <div class="flex items-center justify-between">
+              <h2 class="font-bold text-white text-sm flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span>Boot Tenant Session</span>
+              </h2>
+              <span class="text-[11px] text-zinc-500 font-mono">Multi-Tenant</span>
+            </div>
+
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1">Session Identifier (Tenant ID)</label>
+                <input type="text" id="new-session-id" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-sm font-mono placeholder:text-zinc-600" value="tenant-botla-1">
+              </div>
+
+              <div>
+                <span class="block text-[11px] text-zinc-500 mb-1.5">Quick Tenant Presets:</span>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <button type="button" onclick="window.setSessionInput('tenant-botla-1')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-300 hover:text-white hover:border-zinc-600 transition cursor-pointer">tenant-1</button>
+                  <button type="button" onclick="window.setSessionInput('tenant-botla-2')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-300 hover:text-white hover:border-zinc-600 transition cursor-pointer">tenant-2</button>
+                  <button type="button" onclick="window.setSessionInput('tenant-support')" class="px-2.5 py-1 rounded-lg card-surface-subtle text-[11px] text-zinc-300 hover:text-white hover:border-zinc-600 transition cursor-pointer">support</button>
+                </div>
+              </div>
+
+              <button id="btn-init-session" onclick="window.initSession()" class="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 cursor-pointer">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                <span>Boot Session</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Module 4: HMAC Webhook Relay Target card -->
+          <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-3 shadow-sm">
+            <div class="flex items-center justify-between">
+              <h2 class="font-bold text-white text-xs flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                <span>HMAC Webhook Relay Target</span>
+              </h2>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">SHA256</span>
+            </div>
+            <p class="text-[11px] text-zinc-400">All inbound messages, events, and message ACKs are signed with <code class="text-indigo-300 font-mono">X-Botla-Signature</code> and forwarded to your Laravel core:</p>
+            <div class="p-3 rounded-xl bg-zinc-950/80 border border-zinc-900 font-mono text-[11px] text-zinc-400 break-all flex items-center justify-between gap-2">
+              <span id="webhook-target">http://localhost:8000/api/whatsapp/webhook</span>
+              <button onclick="window.copyWebhookUrl()" class="p-1 text-zinc-400 hover:text-white cursor-pointer transition active:scale-95" title="Copy Webhook URL">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
+              </button>
+            </div>
+          </div>
+
         </div>
-        <div class="p-3 rounded-xl bg-zinc-950/80 border border-zinc-900 font-mono text-[11px] text-zinc-400 break-all flex items-center justify-between gap-2">
-          <span id="webhook-target">http://localhost:8000/api/whatsapp/webhook</span>
-          <button onclick="window.copyWebhookUrl()" class="p-1 text-zinc-400 hover:text-white cursor-pointer" title="Copy Webhook URL">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2z"></path></svg>
-          </button>
+
+        <!-- Right Column (lg:col-span-7): Active Sessions Pool & Quick Outbound Test Sender -->
+        <div class="lg:col-span-7 space-y-6">
+
+          <!-- Module 2: Active Sessions Grid/List -->
+          <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <h2 class="font-bold text-white text-sm">Active Sessions</h2>
+                <span id="sessions-count-badge" class="px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 text-xs font-mono font-medium">0</span>
+              </div>
+              <button onclick="window.loadSessions()" class="text-xs text-zinc-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                <span>Sync</span>
+              </button>
+            </div>
+
+            <div id="sessions-container" class="space-y-3">
+              <div class="p-8 text-center text-zinc-500 text-sm">Loading active sessions...</div>
+            </div>
+          </div>
+
+          <!-- Module 3: Quick Outbound Test Sender -->
+          <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm border-l-2 border-l-emerald-500">
+            <div class="flex items-center justify-between pb-2 border-b border-zinc-800/80">
+              <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                </div>
+                <div>
+                  <h3 class="font-bold text-white text-sm">Quick Test Message Sender</h3>
+                  <p class="text-[11px] text-zinc-400">Dispatch a live test message to verify Baileys socket link</p>
+                </div>
+              </div>
+              <button onclick="window.switchTab('sender')" class="text-[11px] text-indigo-400 hover:text-indigo-300 transition flex items-center gap-1 cursor-pointer">
+                <span>Advanced Console</span>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+              </button>
+            </div>
+
+            <form id="quick-send-form" class="space-y-3.5">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID</label>
+                  <input type="text" id="quick-send-session-id" list="active-sessions-datalist" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3 py-2 rounded-xl text-xs font-mono" value="tenant-botla-1" required>
+                  <datalist id="active-sessions-datalist"></datalist>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / JID</label>
+                  <input type="text" id="quick-send-jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3 py-2 rounded-xl text-xs font-mono" value="6281234567890@s.whatsapp.net" required>
+                </div>
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="block text-xs font-medium text-zinc-400">Message Content</label>
+                  <div class="flex items-center gap-1.5 text-[10px]">
+                    <button type="button" onclick="window.setQuickSendTemplate('Hello from Botla WhatsApp Gateway! 🚀')" class="text-zinc-500 hover:text-zinc-300 cursor-pointer">Greeting</button>
+                    <span class="text-zinc-600">·</span>
+                    <button type="button" onclick="window.setQuickSendTemplate('Your verification code is: *839102* 🔐')" class="text-zinc-500 hover:text-zinc-300 cursor-pointer">OTP</button>
+                    <span class="text-zinc-600">·</span>
+                    <button type="button" onclick="window.setQuickSendTemplate('WhatsApp Gateway operational test passed ✅')" class="text-zinc-500 hover:text-zinc-300 cursor-pointer">Alert</button>
+                  </div>
+                </div>
+                <textarea id="quick-send-text" rows="2" placeholder="Type message..." class="w-full input-base px-3 py-2 rounded-xl text-xs" required>Hello from Botla WhatsApp Gateway! 🚀</textarea>
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl bg-zinc-950/60 border border-zinc-900 text-[11px]">
+                <div class="flex items-center gap-1.5 text-zinc-400">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Anti-ban typing presence (600–1400ms delay)</span>
+                </div>
+                <span class="text-zinc-500 font-mono text-[10px]">composing state</span>
+              </div>
+
+              <button type="submit" id="btn-quick-send" class="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-sm cursor-pointer">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                <span>Send Test Message</span>
+              </button>
+              <div id="quick-send-status" class="text-xs text-center min-h-[16px]"></div>
+            </form>
+          </div>
+
         </div>
+
       </div>
     </section>
 
-    <!-- Column 2: Outbound Console Dispatcher -->
-    <section id="section-sender" class="hidden lg:block lg:col-span-4 space-y-6">
-      <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm">
+    <!-- ========================================================================= -->
+    <!-- TAB 2: CONSOLE / OUTBOUND MESSAGE & MEDIA DISPATCHER                    -->
+    <!-- ========================================================================= -->
+    <section id="section-sender" class="hidden space-y-6 max-w-4xl mx-auto">
+      <div class="card-surface rounded-2xl p-4 sm:p-6 space-y-5 shadow-sm">
         
         <!-- Header & Tab Toggle -->
-        <div class="flex items-center justify-between pb-2 border-b border-zinc-800">
+        <div class="flex items-center justify-between pb-3 border-b border-zinc-800/80 flex-wrap gap-3">
           <div>
-            <h2 class="font-bold text-white text-sm">Message Dispatcher</h2>
-            <p class="text-[11px] text-zinc-400">Anti-Ban Guardrails (Human Typing Delay)</p>
+            <h2 class="font-bold text-white text-base">Outbound Message Dispatcher</h2>
+            <p class="text-xs text-zinc-400">Enforces human typing presence, delays, and MIME binary attachments</p>
           </div>
           <div class="flex p-1 bg-zinc-900/90 rounded-xl border border-zinc-800">
-            <button id="tab-btn-text" onclick="window.switchSendTab('text')" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-zinc-800 text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
-              <span>Text</span>
+            <button id="tab-btn-text" onclick="window.switchSendTab('text')" class="px-4 py-2 rounded-lg text-xs font-semibold bg-zinc-800 text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
+              <span>Text Message</span>
             </button>
-            <button id="tab-btn-media" onclick="window.switchSendTab('media')" class="px-3.5 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
-              <span>Media</span>
+            <button id="tab-btn-media" onclick="window.switchSendTab('media')" class="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
+              <span>Media Attachment</span>
             </button>
           </div>
         </div>
 
         <!-- Text Message Form -->
         <form id="send-form" class="space-y-4">
-          <div>
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID</label>
-            <input type="text" id="send-session-id" list="active-sessions-datalist" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2 rounded-xl text-xs font-mono" value="tenant-botla-1" required>
-            <datalist id="active-sessions-datalist"></datalist>
-          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID (Tenant ID)</label>
+              <input type="text" id="send-session-id" list="active-sessions-datalist" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="tenant-botla-1" required>
+            </div>
 
-          <div>
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / JID</label>
-            <input type="text" id="send-jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3.5 py-2 rounded-xl text-xs font-mono" value="6281234567890@s.whatsapp.net" required>
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / WhatsApp JID</label>
+              <input type="text" id="send-jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="6281234567890@s.whatsapp.net" required>
+            </div>
           </div>
 
           <div>
             <div class="flex items-center justify-between mb-1">
               <label class="block text-xs font-medium text-zinc-400">Message Content</label>
-              <div class="flex items-center gap-1 text-[10px]">
+              <div class="flex items-center gap-1.5 text-[10px]">
                 <button type="button" onclick="window.setSendTemplate('Hello from Botla WhatsApp Gateway! 🚀')" class="text-zinc-500 hover:text-zinc-300">Preset 1</button>
                 <span class="text-zinc-600">·</span>
                 <button type="button" onclick="window.setSendTemplate('Your verification OTP code is: *839102* 🔐')" class="text-zinc-500 hover:text-zinc-300">OTP</button>
               </div>
             </div>
-            <textarea id="send-text" rows="4" placeholder="Type your WhatsApp message..." class="w-full input-base px-3.5 py-2 rounded-xl text-xs" required>Hello from Botla WhatsApp Gateway! 🚀</textarea>
+            <textarea id="send-text" rows="4" placeholder="Type your WhatsApp message..." class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs" required>Hello from Botla WhatsApp Gateway! 🚀</textarea>
           </div>
 
-          <div class="p-3 rounded-xl bg-zinc-950/60 border border-zinc-900 text-[11px] space-y-1">
+          <div class="p-3.5 rounded-xl bg-zinc-950/60 border border-zinc-900 text-[11px] space-y-1">
             <div class="flex items-center justify-between text-zinc-400">
               <span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Presence Simulation</span>
               <span class="font-mono text-zinc-500">600ms - 1400ms</span>
             </div>
-            <p class="text-[10px] text-zinc-500">Auto-sends `composing` state before message to emulate genuine user typing.</p>
+            <p class="text-[10px] text-zinc-500">Auto-sends `composing` state before message dispatch to emulate genuine user typing.</p>
           </div>
 
-          <button type="submit" id="btn-send" class="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-sm cursor-pointer">
+          <button type="submit" id="btn-send" class="w-full py-3 px-4 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-sm cursor-pointer">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
             <span>Send via Gateway</span>
           </button>
@@ -203,19 +381,21 @@
 
         <!-- Media Message Form -->
         <form id="send-media-form" class="space-y-4 hidden">
-          <div>
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID</label>
-            <input type="text" id="media-session-id" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2 rounded-xl text-xs font-mono" value="tenant-botla-1" required>
-          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Session ID (Tenant ID)</label>
+              <input type="text" id="media-session-id" placeholder="e.g. tenant-botla-1" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="tenant-botla-1" required>
+            </div>
 
-          <div>
-            <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / JID</label>
-            <input type="text" id="media-jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3.5 py-2 rounded-xl text-xs font-mono" value="6281234567890@s.whatsapp.net" required>
+            <div>
+              <label class="block text-xs font-medium text-zinc-400 mb-1">Destination Phone / WhatsApp JID</label>
+              <input type="text" id="media-jid" placeholder="e.g. 6281234567890@s.whatsapp.net" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="6281234567890@s.whatsapp.net" required>
+            </div>
           </div>
 
           <div>
             <label class="block text-xs font-medium text-zinc-400 mb-1">Media Type</label>
-            <select id="media-type" onchange="window.toggleMediaFields()" class="w-full input-base px-3.5 py-2 rounded-xl text-xs cursor-pointer">
+            <select id="media-type" onchange="window.toggleMediaFields()" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs cursor-pointer">
               <option value="image">Image (JPEG/PNG/WebP)</option>
               <option value="document">Document / PDF</option>
               <option value="audio">Audio / Voice Note (PTT)</option>
@@ -224,53 +404,55 @@
 
           <div>
             <label class="block text-xs font-medium text-zinc-400 mb-1">Direct Media URL</label>
-            <input type="url" id="media-url" placeholder="https://example.com/invoice.pdf" class="w-full input-base px-3.5 py-2 rounded-xl text-xs font-mono" value="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=400" required>
+            <input type="url" id="media-url" placeholder="https://example.com/invoice.pdf" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono" value="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=400" required>
           </div>
 
           <div id="caption-container">
             <label class="block text-xs font-medium text-zinc-400 mb-1">Caption (Optional)</label>
-            <input type="text" id="media-caption" placeholder="Here is your attached receipt." class="w-full input-base px-3.5 py-2 rounded-xl text-xs">
+            <input type="text" id="media-caption" placeholder="Here is your attached receipt." class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs">
           </div>
 
           <div id="filename-container" class="hidden">
             <label class="block text-xs font-medium text-zinc-400 mb-1">Custom Filename</label>
-            <input type="text" id="media-filename" placeholder="monthly-statement.pdf" class="w-full input-base px-3.5 py-2 rounded-xl text-xs font-mono">
+            <input type="text" id="media-filename" placeholder="monthly-statement.pdf" class="w-full input-base px-3.5 py-2.5 rounded-xl text-xs font-mono">
           </div>
 
-          <div id="ptt-container" class="hidden flex items-center gap-2 p-2 rounded-lg bg-zinc-900 border border-zinc-800">
+          <div id="ptt-container" class="hidden flex items-center gap-2 p-3 rounded-xl bg-zinc-900 border border-zinc-800">
             <input type="checkbox" id="media-ptt" class="rounded bg-zinc-800 border-zinc-700 text-emerald-500 focus:ring-0">
             <label for="media-ptt" class="text-xs text-zinc-300 select-none">Send as Push-To-Talk (Voice Note with waveform)</label>
           </div>
 
-          <button type="submit" id="btn-send-media" class="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 cursor-pointer">
+          <button type="submit" id="btn-send-media" class="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition active:scale-98 flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 cursor-pointer">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-            <span>Dispatch Media</span>
+            <span>Dispatch Media Attachment</span>
           </button>
           <div id="send-media-status" class="text-xs text-center min-h-[16px]"></div>
         </form>
       </div>
     </section>
 
-    <!-- Column 3: Live Diagnostics & Disk Logs -->
-    <section id="section-stream" class="hidden lg:block lg:col-span-4 space-y-6">
-      <div class="card-surface rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm flex flex-col h-full min-h-[580px]">
+    <!-- ========================================================================= -->
+    <!-- TAB 3: LIVE LOGS & DEEP TELEMETRY DIAGNOSTICS                            -->
+    <!-- ========================================================================= -->
+    <section id="section-stream" class="hidden space-y-6 max-w-6xl mx-auto">
+      <div class="card-surface rounded-2xl p-4 sm:p-6 space-y-4 shadow-sm flex flex-col h-full min-h-[620px]">
         
-        <!-- Stream Navigation Tabs -->
-        <div class="flex items-center justify-between pb-2 border-b border-zinc-800 flex-wrap gap-2">
+        <!-- Stream Sub-Navigation Tabs -->
+        <div class="flex items-center justify-between pb-3 border-b border-zinc-800 flex-wrap gap-2">
           <div class="flex p-1 bg-zinc-900/90 rounded-xl border border-zinc-800 text-xs font-semibold">
-            <button id="stream-tab-btn-logs" onclick="window.switchStreamTab('logs')" class="px-3 py-1.5 rounded-lg bg-zinc-800 text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
+            <button id="stream-tab-btn-logs" onclick="window.switchStreamTab('logs')" class="px-3.5 py-1.5 rounded-lg bg-zinc-800 text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
               <span id="sse-status-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               <span>Pino Logs</span>
             </button>
-            <button id="stream-tab-btn-events" onclick="window.switchStreamTab('events')" class="px-3 py-1.5 rounded-lg text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
-              <span>Events</span>
+            <button id="stream-tab-btn-events" onclick="window.switchStreamTab('events')" class="px-3.5 py-1.5 rounded-lg text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
+              <span>Gateway Events</span>
             </button>
-            <button id="stream-tab-btn-files" onclick="window.switchStreamTab('files')" class="px-3 py-1.5 rounded-lg text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
-              <span>Disk Logs</span>
+            <button id="stream-tab-btn-files" onclick="window.switchStreamTab('files')" class="px-3.5 py-1.5 rounded-lg text-zinc-400 hover:text-white cursor-pointer transition active:scale-95 flex items-center gap-1.5">
+              <span>Disk Logs Explorer</span>
             </button>
           </div>
-          <div id="sse-connection-label" class="text-emerald-400 text-[10px] font-mono flex items-center gap-1">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> SSE Active
+          <div id="sse-connection-label" class="text-emerald-400 text-xs font-mono flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> SSE Active Stream
           </div>
         </div>
 
@@ -278,78 +460,102 @@
         <div id="subview-pino-logs" class="flex-1 flex flex-col space-y-3">
           <div class="flex items-center justify-between gap-2 flex-wrap">
             <div class="flex items-center gap-1 bg-zinc-900/90 p-1 rounded-lg border border-zinc-800 text-[11px]">
-              <button onclick="window.setLogLevelFilter('all')" data-level="all" class="log-level-filter-btn px-2 py-0.8 rounded-lg bg-zinc-800 text-white font-medium cursor-pointer">All</button>
-              <button onclick="window.setLogLevelFilter('info')" data-level="info" class="log-level-filter-btn px-2 py-0.8 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Info</button>
-              <button onclick="window.setLogLevelFilter('warn')" data-level="warn" class="log-level-filter-btn px-2 py-0.8 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Warn</button>
-              <button onclick="window.setLogLevelFilter('error')" data-level="error" class="log-level-filter-btn px-2 py-0.8 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Error</button>
+              <button onclick="window.setLogLevelFilter('all')" data-level="all" class="log-level-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 text-white font-medium cursor-pointer">All</button>
+              <button onclick="window.setLogLevelFilter('info')" data-level="info" class="log-level-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Info</button>
+              <button onclick="window.setLogLevelFilter('warn')" data-level="warn" class="log-level-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Warn</button>
+              <button onclick="window.setLogLevelFilter('error')" data-level="error" class="log-level-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Error</button>
             </div>
             <div class="flex items-center gap-2">
-              <button id="btn-log-stream-pause" onclick="window.toggleLogStreamPause()" class="px-2 py-1 text-[11px] rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition cursor-pointer">Pause</button>
-              <button onclick="window.clearLogFeed()" class="px-2 py-1 text-[11px] rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition cursor-pointer">Clear</button>
+              <button id="btn-log-stream-pause" onclick="window.toggleLogStreamPause()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer">Pause</button>
+              <button onclick="window.clearLogFeed()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer">Clear</button>
             </div>
           </div>
 
           <div class="flex items-center justify-between gap-2">
-            <input type="text" id="log-filter-session" oninput="window.filterLogsChanged()" placeholder="Filter by Session ID..." class="w-full input-base px-2.5 py-1.5 rounded-lg text-[11px] font-mono placeholder:text-zinc-600">
-            <label class="flex items-center gap-1.5 text-[11px] text-zinc-400 select-none whitespace-nowrap cursor-pointer">
+            <input type="text" id="log-filter-session" oninput="window.filterLogsChanged()" placeholder="Filter by Session ID..." class="w-full input-base px-3 py-1.5 rounded-lg text-xs font-mono placeholder:text-zinc-600">
+            <label class="flex items-center gap-1.5 text-xs text-zinc-400 select-none whitespace-nowrap cursor-pointer">
               <input type="checkbox" id="log-autoscroll" checked class="rounded bg-zinc-800 border-zinc-700 text-emerald-500 focus:ring-0">
               <span>Auto-scroll</span>
             </label>
           </div>
 
-          <div id="logs-feed" class="flex-1 bg-zinc-950/80 rounded-xl p-2.5 border border-zinc-900 overflow-y-auto max-h-[380px] space-y-2 font-mono">
+          <div id="logs-feed" class="flex-1 bg-zinc-950/80 rounded-xl p-3 border border-zinc-900 overflow-y-auto max-h-[440px] space-y-2 font-mono">
             <div class="text-zinc-600 text-center py-12 text-xs font-sans">Connecting to live log stream...</div>
           </div>
-          <div id="log-counter" class="text-[10px] text-zinc-500 font-mono text-right">0 logs captured</div>
+          <div id="log-counter" class="text-xs text-zinc-500 font-mono text-right">0 logs captured</div>
         </div>
 
         <!-- Subview 2: Gateway Events Feed -->
         <div id="subview-gateway-events" class="hidden flex-1 flex flex-col space-y-3">
           <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-1 bg-zinc-900/90 p-1 rounded-lg border border-zinc-800 text-[10px] overflow-x-auto scrollbar-none">
-              <button onclick="window.setEventFilter('all')" data-filter="all" class="event-filter-btn px-2 py-0.8 rounded-lg bg-zinc-800 text-white font-medium cursor-pointer">All</button>
-              <button onclick="window.setEventFilter('inbound_message')" data-filter="inbound_message" class="event-filter-btn px-2 py-0.8 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Inbound</button>
-              <button onclick="window.setEventFilter('outbound_message')" data-filter="outbound_message" class="event-filter-btn px-2 py-0.8 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Outbound</button>
-              <button onclick="window.setEventFilter('message_ack')" data-filter="message_ack" class="event-filter-btn px-2 py-0.8 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">ACKs</button>
+            <div class="flex items-center gap-1 bg-zinc-900/90 p-1 rounded-lg border border-zinc-800 text-xs overflow-x-auto scrollbar-none">
+              <button onclick="window.setEventFilter('all')" data-filter="all" class="event-filter-btn px-2.5 py-1 rounded-lg bg-zinc-800 text-white font-medium cursor-pointer">All</button>
+              <button onclick="window.setEventFilter('inbound_message')" data-filter="inbound_message" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Inbound</button>
+              <button onclick="window.setEventFilter('outbound_message')" data-filter="outbound_message" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">Outbound</button>
+              <button onclick="window.setEventFilter('message_ack')" data-filter="message_ack" class="event-filter-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 cursor-pointer">ACKs</button>
             </div>
             <div class="flex items-center gap-2">
-              <button id="btn-stream-pause" onclick="window.toggleStreamPause()" class="px-2 py-1 text-[11px] rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition cursor-pointer">Pause</button>
-              <button onclick="window.clearEventFeed()" class="px-2 py-1 text-[11px] rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition cursor-pointer">Clear</button>
+              <button id="btn-stream-pause" onclick="window.toggleStreamPause()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer">Pause</button>
+              <button onclick="window.clearEventFeed()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition cursor-pointer">Clear</button>
             </div>
           </div>
 
-          <div id="events-feed" class="flex-1 bg-zinc-950/80 rounded-xl p-2.5 border border-zinc-900 overflow-y-auto max-h-[380px] space-y-2">
+          <div id="events-feed" class="flex-1 bg-zinc-950/80 rounded-xl p-3 border border-zinc-900 overflow-y-auto max-h-[440px] space-y-2">
             <div class="text-zinc-600 text-center py-12 text-xs">Waiting for gateway event signals...</div>
           </div>
-          <div id="stream-counter" class="text-[10px] text-zinc-500 font-mono text-right">0 events logged</div>
+          <div id="stream-counter" class="text-xs text-zinc-500 font-mono text-right">0 events logged</div>
         </div>
 
         <!-- Subview 3: Disk Logs & Rotation Explorer -->
         <div id="subview-log-files" class="hidden flex-1 flex flex-col space-y-3">
           <div class="flex items-center justify-between">
             <div class="text-xs text-zinc-400">
-              <span>Disk Usage: </span>
+              <span>Total Disk Usage: </span>
               <span id="log-total-disk-usage" class="font-bold text-white font-mono">0 B</span>
             </div>
             <div class="flex items-center gap-2">
-              <button onclick="window.triggerLogCleanup()" class="px-2.5 py-1 text-[11px] rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition cursor-pointer flex items-center gap-1" title="Purge files older than 14 days">
-                <svg class="w-3 h-3 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+              <button onclick="window.triggerLogCleanup()" class="px-3 py-1 text-xs rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition cursor-pointer flex items-center gap-1.5" title="Purge files older than 14 days">
+                <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                 <span>Retention Clean</span>
               </button>
-              <button onclick="window.confirmClearAllLogs()" class="px-2.5 py-1 text-[11px] rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition cursor-pointer flex items-center gap-1" title="Truncate all log files to 0 B">
+              <button onclick="window.confirmClearAllLogs()" class="px-3 py-1 text-xs rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition cursor-pointer flex items-center gap-1.5" title="Truncate all log files to 0 B">
                 <span>Clear All</span>
               </button>
             </div>
           </div>
 
-          <div id="log-files-list" class="flex-1 bg-zinc-950/80 rounded-xl p-2 border border-zinc-900 overflow-y-auto max-h-[380px] space-y-2 text-xs">
+          <div id="log-files-list" class="flex-1 bg-zinc-950/80 rounded-xl p-3 border border-zinc-900 overflow-y-auto max-h-[440px] space-y-2 text-xs">
             <div class="text-zinc-500 text-center py-8">Loading log files...</div>
           </div>
         </div>
 
       </div>
     </section>
+
   </main>
+
+  <!-- ========================================================================= -->
+  <!-- MOBILE BOTTOM NAVIGATION (< 768px ONLY)                                  -->
+  <!-- ========================================================================= -->
+  <nav class="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-6 py-2 flex items-center justify-around text-xs shadow-2xl">
+    <button id="bottom-nav-sessions" onclick="window.switchTab('sessions')" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-emerald-400 transition cursor-pointer">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+      <span class="text-[10px] font-medium">Sessions</span>
+    </button>
+    <button id="bottom-nav-sender" onclick="window.switchTab('sender')" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+      <span class="text-[10px] font-medium">Console</span>
+    </button>
+    <button id="bottom-nav-stream" onclick="window.switchTab('stream')" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer relative">
+      <span class="absolute top-1 right-3 w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+      <span class="text-[10px] font-medium">Live Logs</span>
+    </button>
+  </nav>
+
+  <!-- ========================================================================= -->
+  <!-- MODALS & OVERLAYS                                                         -->
+  <!-- ========================================================================= -->
 
   <!-- QR Code & Phone Pairing Code Modal -->
   <div id="qr-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
@@ -429,7 +635,7 @@
       </div>
       <div class="text-center space-y-1">
         <h3 class="font-bold text-white text-base">Purge Session?</h3>
-        <p class="text-xs text-zinc-400">This will close the socket and wipe all authentication keys from Redis for session:</p>
+        <p class="text-xs text-zinc-400">This will close the Baileys socket and purge all credentials from Redis for session:</p>
         <p id="purge-target-session-id" class="text-xs font-mono font-bold text-rose-400 py-1"></p>
       </div>
       <div class="grid grid-cols-2 gap-2 pt-2">
@@ -496,34 +702,17 @@
       <div class="px-4 py-2 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between text-[11px] text-zinc-400 font-mono">
         <div id="log-viewer-footer-stats">Showing last 200 lines</div>
         <div class="flex items-center gap-2">
-          <button onclick="window.scrollLogViewerToTop()" class="hover:text-white transition">Top ↑</button>
+          <button onclick="window.scrollLogViewerToTop()" class="hover:text-white transition cursor-pointer">Top ↑</button>
           <span>·</span>
-          <button onclick="window.scrollLogViewerToBottom()" class="hover:text-white transition">Bottom ↓</button>
+          <button onclick="window.scrollLogViewerToBottom()" class="hover:text-white transition cursor-pointer">Bottom ↓</button>
         </div>
       </div>
 
     </div>
   </div>
 
-  <!-- Mobile Bottom Navigation (< lg) -->
-  <div class="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-6 py-1.5 flex items-center justify-around text-xs">
-    <button id="bottom-nav-sessions" onclick="window.switchMobileTab('sessions')" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-emerald-400 transition cursor-pointer">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-      <span class="text-[10px] font-medium">Sessions</span>
-    </button>
-    <button id="bottom-nav-sender" onclick="window.switchMobileTab('sender')" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-      <span class="text-[10px] font-medium">Console</span>
-    </button>
-    <button id="bottom-nav-stream" onclick="window.switchMobileTab('stream')" class="flex flex-col items-center gap-1 py-1 px-3 rounded-lg text-zinc-400 hover:text-zinc-200 transition cursor-pointer relative">
-      <span class="absolute top-1 right-3 w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-      <span class="text-[10px] font-medium">Live Logs</span>
-    </button>
-  </div>
-
   <!-- Toast Notification Portal -->
-  <div id="toast-container" class="fixed bottom-16 lg:bottom-6 right-4 sm:right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
+  <div id="toast-container" class="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
 
   <!-- Module Entrypoint -->
   <script type="module" src="/js/app.js"></script>

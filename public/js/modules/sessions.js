@@ -3,7 +3,7 @@
  * Handles session creation, active socket list, QR display, and phone pairing code.
  */
 import { SessionApi } from '../api.js';
-import { escapeHtml, showToast, switchMobileTab } from './ui.js';
+import { escapeHtml, showToast, switchTab } from './ui.js';
 
 let activeQrSession = null;
 let qrPollInterval = null;
@@ -183,7 +183,7 @@ export function fillSender(sessionId) {
  */
 export function selectSessionForSend(sessionId) {
   fillSender(sessionId);
-  switchMobileTab('sender');
+  switchTab('sender');
   const sendText = document.getElementById('send-text');
   if (sendText) sendText.focus();
   showToast(`Selected '${sessionId}' in console`);

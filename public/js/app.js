@@ -12,6 +12,7 @@ import {
   getRelativeTime,
   showToast,
   switchMobileTab,
+  switchTab,
 } from './modules/ui.js';
 
 // Import Sessions management
@@ -102,6 +103,7 @@ export async function manualRefreshAll() {
 Object.assign(window, {
   // UI & General
   showToast,
+  switchTab,
   switchMobileTab,
   copyWebhookUrl,
   manualRefreshAll,
