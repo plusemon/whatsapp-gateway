@@ -48,31 +48,31 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           },
         },
         response: {
-          200: {
-            description: 'Message dispatched successfully',
+          202: {
+            description: 'Message accepted and queued for anti-ban dispatch',
             type: 'object',
             properties: {
               success: { type: 'boolean', example: true },
               data: {
                 type: 'object',
                 properties: {
-                  messageId: { type: 'string', example: '3EB084DC6F0385409BFEDC' },
-                  status: { type: 'string', example: 'SERVER_ACK' },
-                  dispatchedAt: { type: 'string', format: 'date-time', example: '2026-09-20T04:30:00.000Z' },
+                  jobId: { type: 'string', example: '12' },
+                  status: { type: 'string', example: 'QUEUED' },
+                  estimatedDelayMs: { type: 'number', example: 1500 },
                 },
               },
             },
           },
           400: {
-            description: 'Bad Request - Validation or session offline error',
+            description: 'Bad Request - Validation error',
             type: 'object',
             properties: {
               success: { type: 'boolean', example: false },
               error: {
                 type: 'object',
                 properties: {
-                  code: { type: 'string', example: 'SESSION_NOT_CONNECTED' },
-                  message: { type: 'string', example: "Session 'tenant-botla-1' is not active or connected" },
+                  code: { type: 'string', example: 'VALIDATION_ERROR' },
+                  message: { type: 'string', example: 'sessionId, to, and message are required fields.' },
                 },
               },
             },
@@ -133,16 +133,17 @@ export const messageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           },
         },
         response: {
-          200: {
-            description: 'Media message dispatched successfully',
+          202: {
+            description: 'Media message accepted and queued for anti-ban dispatch',
             type: 'object',
             properties: {
               success: { type: 'boolean', example: true },
               data: {
                 type: 'object',
                 properties: {
-                  messageId: { type: 'string', example: '3EB084DC6F0385409BFEDC' },
-                  status: { type: 'string', example: 'SERVER_ACK' },
+                  jobId: { type: 'string', example: '12' },
+                  status: { type: 'string', example: 'QUEUED' },
+                  estimatedDelayMs: { type: 'number', example: 2000 },
                 },
               },
             },

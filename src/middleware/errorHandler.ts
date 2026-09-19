@@ -29,11 +29,16 @@ export function registerErrorHandlers(
 
     // Always respond with JSON error for API requests
     if (request.url.startsWith('/api')) {
+      const errorCode =
+        error.code === 'FST_ERR_VALIDATION' || error.validation
+          ? 'VALIDATION_ERROR'
+          : error.code || 'INTERNAL_ERROR';
+
       return ResponseUtil.error(
         reply,
         error.message || 'Internal Server Error',
         statusCode,
-        error.code || 'INTERNAL_ERROR',
+        errorCode,
         error.validation || null
       );
     }

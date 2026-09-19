@@ -16,6 +16,8 @@ import { apiRoutes } from './routes/api.routes.js';
 import { getDashboardHtml, uiRoutes } from './routes/ui.routes.js';
 import { sessionService } from './services/session.service.js';
 import { DbService } from './services/db.service.js';
+import { initMessageWorker, closeMessageWorker } from './queues/message.worker.js';
+import { messageQueue, redisConnection } from './queues/message.queue.js';
 import { startMediaCleanupWorker, stopMediaCleanupWorker } from './utils/cleanup.js';
 import { logger } from './utils/logger.js';
 
@@ -126,6 +128,14 @@ export async function startServer() {
     // Start background automated media storage cleanup worker
     startMediaCleanupWorker();
 
+    // Initialize BullMQ Anti-Ban Outbound Message Worker
+    try {
+      initMessageWorker(redisConnection);
+      logger.info('[Server] BullMQ Anti-Ban Outbound Message Worker initialized successfully');
+    } catch (workerErr: any) {
+      logger.warn({ err: workerErr.message }, '[Server] Warning initializing BullMQ message worker');
+    }
+
     // Auto-restore previously active sessions from persistent Redis storage
     sessionService.restoreAllSessions().catch((restoreErr) => {
       logger.error(
@@ -140,6 +150,14 @@ export async function startServer() {
 
       // 1. Stop background workers
       stopMediaCleanupWorker();
+
+      // 1b. Close BullMQ Message Worker & Queue
+      try {
+        await closeMessageWorker();
+        await messageQueue.close();
+      } catch (queueErr: any) {
+        logger.warn({ err: queueErr.message }, '[Server] Warning closing message queue during shutdown');
+      }
 
       // 2. Gracefully end active WASockets
       try {

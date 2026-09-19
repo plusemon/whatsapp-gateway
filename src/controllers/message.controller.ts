@@ -6,6 +6,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { sessionService } from '../services/session.service.js';
 import { DbService, MessageDirection } from '../services/db.service.js';
 import { ResponseUtil } from '../utils/response.util.js';
+import { enqueueMessageJob, messageQueue } from '../queues/message.queue.js';
 import type {
   SendMediaBody,
   SendMediaV1Body,
@@ -82,7 +83,7 @@ export class MessageController {
 
   /**
    * POST /api/v1/messages/send-text
-   * Standardized REST API v1 Text Dispatch
+   * Standardized REST API v1 Text Dispatch (Decoupled BullMQ Anti-Ban Queue)
    */
   public static async sendTextV1(
     request: FastifyRequest<{ Body: SendTextV1Body }>,
@@ -103,39 +104,40 @@ export class MessageController {
     }
 
     try {
-      const result = await sessionService.sendMessage(
-        targetSession,
-        targetRecipient,
-        messageText,
-        presence !== false
-      );
+      const job = await enqueueMessageJob('send_text', {
+        sessionId: targetSession,
+        to: targetRecipient,
+        type: 'text',
+        message: messageText,
+        presence: presence !== false,
+      });
 
       return ResponseUtil.success(
         reply,
         {
-          messageId: result.messageId,
-          status: 'SERVER_ACK',
+          jobId: String(job.id || '1'),
+          status: 'QUEUED',
+          estimatedDelayMs: 1500,
         },
-        200
+        202
       );
     } catch (err: any) {
       request.log.error(
         { sessionId: targetSession, to: targetRecipient, err: err.message },
-        'Failed to dispatch v1 text message'
+        'Failed to enqueue v1 text message'
       );
-      const isNotConnected = err.message?.includes('not active or connected');
       return ResponseUtil.error(
         reply,
-        err.message || 'Failed to dispatch outbound message',
-        isNotConnected ? 400 : 500,
-        isNotConnected ? 'SESSION_NOT_CONNECTED' : 'SEND_FAILED'
+        err.message || 'Failed to enqueue outbound message',
+        500,
+        'QUEUE_ERROR'
       );
     }
   }
 
   /**
    * POST /api/v1/messages/send-media
-   * Standardized REST API v1 Media Dispatch
+   * Standardized REST API v1 Media Dispatch (Decoupled BullMQ Anti-Ban Queue)
    */
   public static async sendMediaV1(
     request: FastifyRequest<{ Body: SendMediaV1Body }>,
@@ -181,37 +183,36 @@ export class MessageController {
     }
 
     try {
-      const result = await sessionService.sendMedia(
-        targetSession,
-        targetRecipient,
-        targetType,
-        targetUrl,
-        {
-          caption,
-          filename: targetFilename,
-          ptt,
-        }
-      );
+      const job = await enqueueMessageJob('send_media', {
+        sessionId: targetSession,
+        to: targetRecipient,
+        type: 'media',
+        mediaUrl: targetUrl,
+        mediaType: targetType,
+        caption,
+        fileName: targetFilename,
+        presence: true,
+      });
 
       return ResponseUtil.success(
         reply,
         {
-          messageId: result.messageId,
-          status: 'SERVER_ACK',
+          jobId: String(job.id || '1'),
+          status: 'QUEUED',
+          estimatedDelayMs: 2000,
         },
-        200
+        202
       );
     } catch (err: any) {
       request.log.error(
         { sessionId: targetSession, to: targetRecipient, mediaType: targetType, err: err.message },
-        'Failed to dispatch v1 media message'
+        'Failed to enqueue v1 media message'
       );
-      const isNotConnected = err.message?.includes('not active or connected');
       return ResponseUtil.error(
         reply,
-        err.message || 'Failed to dispatch outbound media message',
-        isNotConnected ? 400 : 500,
-        isNotConnected ? 'SESSION_NOT_CONNECTED' : 'SEND_MEDIA_FAILED'
+        err.message || 'Failed to enqueue outbound media message',
+        500,
+        'QUEUE_ERROR'
       );
     }
   }
