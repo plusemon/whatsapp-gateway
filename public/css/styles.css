@@ -113,3 +113,64 @@ body {
   scrollbar-width: none;
 }
 
+/* 8-Box Segmented Pairing Code Display */
+.pairing-segment-box {
+  width: 2.25rem;
+  height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #10b981;
+  background-color: #18181b;
+  border: 1.5px solid #27272a;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
+  transition: all 0.15s ease;
+  user-select: all;
+}
+
+@media (min-width: 640px) {
+  .pairing-segment-box {
+    width: 2.6rem;
+    height: 3.25rem;
+    font-size: 1.4rem;
+  }
+}
+
+.pairing-segment-box:hover {
+  border-color: #10b981;
+  background-color: #1f1f23;
+}
+
+/* Terminal Console Styling */
+.terminal-window {
+  background-color: #0c0c0e;
+  border: 1px solid #27272a;
+  box-shadow: inset 0 2px 8px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* Additional Responsive Slate and Scrollbar Utilities */
+.border-slate-850 {
+  border-color: #172033;
+}
+
+.border-slate-850\/50 {
+  border-color: rgba(23, 32, 51, 0.5);
+}
+
+.bg-slate-850 {
+  background-color: #172033;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+

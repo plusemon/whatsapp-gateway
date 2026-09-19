@@ -33,9 +33,9 @@ export class SessionService {
   private activeSockets: Map<string, WASocket> = new Map();
   private sessions: Map<string, SessionInstance> = new Map();
   private metadataMap: Map<string, SessionMetadata> = new Map();
+  public qrCodes: Map<string, string> = new Map();
   private inFlightInits: Map<string, Promise<SessionMetadata>> = new Map();
   private terminatingSessions: Set<string> = new Set();
-  private pairingModeSessions: Set<string> = new Set();
   private recentEvents: RecentEvent[] = [];
   private readonly maxEvents = 100;
 
@@ -122,36 +122,18 @@ export class SessionService {
     const existingSocket = existingInstance?.sock || this.activeSockets.get(sessionId);
     const existingMeta = this.metadataMap.get(sessionId);
 
-    // Resolve target authMode and phoneNumber
+    // Resolve target authMode and phoneNumber (defaults to 'qr')
     let authMode: 'qr' | 'pairing_code' = 'qr';
     let phoneNumber: string | undefined = undefined;
 
     if (typeof modeOrOpts === 'string') {
-      authMode = modeOrOpts;
-      if (authMode === 'qr') {
-        this.pairingModeSessions.delete(sessionId);
-      } else if (authMode === 'pairing_code') {
-        this.pairingModeSessions.add(sessionId);
-      }
+      authMode = modeOrOpts || 'qr';
     } else if (modeOrOpts && typeof modeOrOpts === 'object') {
       authMode = modeOrOpts.authMode || existingInstance?.authMode || existingMeta?.authMode || 'qr';
       phoneNumber = modeOrOpts.phoneNumber || existingInstance?.phoneNumber;
-      if (authMode === 'pairing_code') {
-        this.pairingModeSessions.add(sessionId);
-      } else if (authMode === 'qr') {
-        this.pairingModeSessions.delete(sessionId);
-      }
     } else {
-      // Preserve active authMode if already set on session
       authMode = existingInstance?.authMode || existingMeta?.authMode || 'qr';
       phoneNumber = existingInstance?.phoneNumber;
-    }
-
-    // Lock authMode if session is marked in pairingModeSessions
-    if (this.pairingModeSessions.has(sessionId)) {
-      authMode = 'pairing_code';
-    } else if (authMode === 'pairing_code') {
-      this.pairingModeSessions.add(sessionId);
     }
 
     // If session is already connected, update metadata/instance and return state
@@ -186,6 +168,9 @@ export class SessionService {
         '[SessionService] Terminating previous socket for clean init'
       );
       try {
+        existingSocket.ev.removeAllListeners('connection.update');
+        existingSocket.ev.removeAllListeners('creds.update');
+        existingSocket.ev.removeAllListeners('messages.upsert');
         if ((existingSocket as any).ws && typeof (existingSocket as any).ws.close === 'function') {
           (existingSocket as any).ws.close();
         }
@@ -269,23 +254,6 @@ export class SessionService {
       sock.ev.on('connection.update', async (update) => {
         const currentSession = this.sessions.get(sessionId);
 
-        const isPairingCodeMode =
-          currentSession?.authMode === 'pairing_code' ||
-          meta.authMode === 'pairing_code' ||
-          this.pairingModeSessions.has(sessionId);
-
-        // Hard guard: Discard ANY QR payload if session is in pairing_code mode
-        if (isPairingCodeMode) {
-          delete update.qr;
-          meta.qr = null;
-          meta.qrUpdatedAt = null;
-          try {
-            await redis.del(`wa:session:${sessionId}:qr`);
-          } catch {
-            // Ignore
-          }
-        }
-
         // If session is marked for intentional termination/purge, suppress updates
         if (this.terminatingSessions.has(sessionId)) {
           sessionLog.info(
@@ -294,37 +262,42 @@ export class SessionService {
           this.activeSockets.delete(sessionId);
           this.sessions.delete(sessionId);
           this.metadataMap.delete(sessionId);
+          this.qrCodes.delete(sessionId);
+          return;
+        }
+
+        // Ignore updates from superseded or already-detached sockets
+        if (this.activeSockets.get(sessionId) !== sock) {
+          sessionLog.debug(
+            '[SessionService] Connection update received from superseded socket; ignoring.'
+          );
           return;
         }
 
         const { connection, lastDisconnect, qr } = update;
         meta.lastActiveAt = Date.now();
 
-        // 1. Capture and cache raw QR strings ONLY IF session is not in pairing_code mode
-        if (isPairingCodeMode) {
-          // Explicitly clear any QR metadata and avoid generating qr_generated log events
-          meta.qr = null;
-          meta.qrUpdatedAt = null;
-        } else if (qr) {
-          meta.qr = qr;
+        // 1. Natural Baileys QR Code emission
+        if (update.qr) {
+          this.qrCodes.set(sessionId, update.qr);
+          meta.qr = update.qr;
           meta.qrUpdatedAt = Date.now();
           meta.status = 'qr_ready';
           sessionLog.info('[SessionService] New WhatsApp QR Code generated and ready for scan');
 
           try {
-            await redis.set(`wa:session:${sessionId}:qr`, qr, 'EX', 60);
+            await redis.set(`wa:session:${sessionId}:qr`, update.qr, 'EX', 60);
           } catch (err: any) {
             sessionLog.warn({ err: err.message }, '[Redis] Failed to cache QR string in Redis');
           }
 
-          this.logEvent('session_event', sessionId, { action: 'qr_generated', qr });
+          this.logEvent('session_event', sessionId, { action: 'qr_generated', qr: update.qr });
+          this.emitEvent(sessionId, 'qr_generated', { qr: update.qr });
         }
 
         // 2. Connection opened successfully
         if (connection === 'open') {
-          if (this.pairingModeSessions.has(sessionId)) {
-            this.pairingModeSessions.delete(sessionId);
-          }
+          this.qrCodes.delete(sessionId);
           meta.status = 'connected';
           meta.qr = null;
           meta.qrUpdatedAt = null;
@@ -379,14 +352,23 @@ export class SessionService {
 
         // 3. Connection closed / disconnected
         if (connection === 'close') {
+          this.qrCodes.delete(sessionId);
           const disconnectError = lastDisconnect?.error as any;
           const boomError = disconnectError as Boom;
           const statusCode = boomError?.output?.statusCode || disconnectError?.status || disconnectError?.statusCode;
           const errorMessage = disconnectError?.message || 'Connection closed';
           const errorStack = disconnectError?.stack || undefined;
 
+          const isConflict =
+            statusCode === DisconnectReason.connectionReplaced ||
+            statusCode === 440 ||
+            (typeof errorMessage === 'string' && errorMessage.toLowerCase().includes('conflict')) ||
+            (typeof errorMessage === 'string' && errorMessage.toLowerCase().includes('connection replaced'));
+
           let category = 'Unknown Disconnection';
-          if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+          if (isConflict) {
+            category = 'Connection Replaced / Stream Conflict (440)';
+          } else if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
             category = 'Logged Out / Credentials Dead (401)';
           } else if (statusCode === DisconnectReason.timedOut || statusCode === 408) {
             category = 'Connection Timed Out / Socket Dead (408)';
@@ -402,19 +384,22 @@ export class SessionService {
             category = 'WhatsApp Service Unavailable (503)';
           } else if (statusCode === DisconnectReason.multideviceMismatch || statusCode === 411) {
             category = 'Multi-Device Protocol Mismatch (411)';
+          } else if (statusCode === DisconnectReason.forbidden || statusCode === 403) {
+            category = 'Access Forbidden (403)';
           }
 
-          const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401;
-          const isRestartRequired = statusCode === DisconnectReason.restartRequired || statusCode === 515;
+          const isLoggedOut = !isConflict && (statusCode === DisconnectReason.loggedOut || statusCode === 401);
+          const isRestartRequired = !isConflict && (statusCode === DisconnectReason.restartRequired || statusCode === 515);
           const isQrExpired =
-            errorMessage.includes('QR refs attempts ended') ||
-            ((statusCode === DisconnectReason.timedOut || statusCode === 408) && (meta.status === 'qr_ready' || meta.status === 'connecting'));
+            !isConflict &&
+            (errorMessage.includes('QR refs attempts ended') ||
+            ((statusCode === DisconnectReason.timedOut || statusCode === 408) && (meta.status === 'qr_ready' || meta.status === 'connecting')));
 
           if (isQrExpired) {
             category = 'QR Code Expired (Timed Out)';
           }
 
-          const logMethod = isQrExpired ? 'info' : (isLoggedOut || (statusCode && statusCode >= 500 && statusCode !== 515) ? 'warn' : (statusCode === 515 ? 'debug' : (statusCode ? 'info' : 'debug')));
+          const logMethod = isQrExpired ? 'info' : (isConflict ? 'warn' : (isLoggedOut || (statusCode && statusCode >= 500 && statusCode !== 515) ? 'warn' : (statusCode === 515 ? 'debug' : (statusCode ? 'info' : 'debug'))));
 
           const preservedMode = currentSession?.authMode || meta.authMode || 'qr';
           const preservedPhone = currentSession?.phoneNumber;
@@ -425,6 +410,7 @@ export class SessionService {
               category,
               error: errorMessage,
               stack: isQrExpired ? undefined : errorStack,
+              isConflict,
               isLoggedOut,
               isRestartRequired,
               isQrExpired,
@@ -456,6 +442,29 @@ export class SessionService {
             this.logEvent('session_event', sessionId, {
               action: 'qr_expired',
               statusCode,
+            });
+            return;
+          }
+
+          if (isConflict) {
+            sessionLog.warn(
+              { sessionId, statusCode, error: errorMessage },
+              '[SessionService] Stream conflict / connection replaced: Another WhatsApp client connected or socket collision detected. Preserving credentials in Redis.'
+            );
+            meta.status = 'disconnected';
+            meta.qr = null;
+            meta.reconnectAttempts = 0;
+            this.activeSockets.delete(sessionId);
+            this.sessions.delete(sessionId);
+
+            this.logEvent('session_event', sessionId, {
+              action: 'stream_conflict',
+              statusCode: 440,
+              category,
+            });
+            this.emitEvent(sessionId, 'stream_conflict', {
+              sessionId,
+              message: 'Connection replaced or conflict detected with another active WhatsApp session. Click Reconnect to resume.',
             });
             return;
           }
@@ -793,17 +802,10 @@ export class SessionService {
   }
 
   /**
-   * Checks if a session is currently in phone pairing code mode.
+   * Checks if a session is currently in phone pairing code mode (deprecated legacy helper).
    */
-  public isPairingMode(sessionId: string): boolean {
-    if (this.terminatingSessions.has(sessionId)) return false;
-    const currentSession = this.sessions.get(sessionId);
-    const meta = this.metadataMap.get(sessionId);
-    return (
-      currentSession?.authMode === 'pairing_code' ||
-      meta?.authMode === 'pairing_code' ||
-      this.pairingModeSessions.has(sessionId)
-    );
+  public isPairingMode(_sessionId: string): boolean {
+    return false;
   }
 
   /**
@@ -829,23 +831,16 @@ export class SessionService {
 
   /**
    * Retrieves raw QR string for a given session from memory or Redis.
-   * Suppresses QR retrieval if session is in dedicated 'pairing_code' authMode.
    */
   public async getQR(sessionId: string): Promise<string | null> {
     if (this.terminatingSessions.has(sessionId)) return null;
 
-    const currentSession = this.sessions.get(sessionId);
-    const meta = this.metadataMap.get(sessionId);
-
-    // Hard guard: If session is in pairing_code authMode or pairingModeSessions, return null
-    if (
-      currentSession?.authMode === 'pairing_code' ||
-      meta?.authMode === 'pairing_code' ||
-      this.pairingModeSessions.has(sessionId)
-    ) {
-      return null;
+    const memoryQr = this.qrCodes.get(sessionId);
+    if (memoryQr) {
+      return memoryQr;
     }
 
+    const meta = this.metadataMap.get(sessionId);
     if (meta?.qr) {
       return meta.qr;
     }
@@ -854,6 +849,7 @@ export class SessionService {
       const redis = await getRedisClient();
       const cachedQr = await redis.get(`wa:session:${sessionId}:qr`);
       if (cachedQr) {
+        this.qrCodes.set(sessionId, cachedQr);
         if (meta) meta.qr = cachedQr;
         return cachedQr;
       }
@@ -865,11 +861,25 @@ export class SessionService {
   }
 
   /**
-   * Retrieves session metadata.
+   * Retrieves session metadata including active WASocket reference if initialized.
    */
-  public getSession(sessionId: string): SessionMetadata | null {
+  public getSession(sessionId: string): (SessionMetadata & { sock?: WASocket }) | null {
     if (this.terminatingSessions.has(sessionId)) return null;
-    return this.metadataMap.get(sessionId) || null;
+    const meta = this.metadataMap.get(sessionId);
+    if (!meta) return null;
+    const sock = this.sessions.get(sessionId)?.sock || this.activeSockets.get(sessionId);
+    return {
+      ...meta,
+      sock,
+    };
+  }
+
+  /**
+   * Retrieves active WASocket instance for a session.
+   */
+  public getSocket(sessionId: string): WASocket | null {
+    if (this.terminatingSessions.has(sessionId)) return null;
+    return this.sessions.get(sessionId)?.sock || this.activeSockets.get(sessionId) || null;
   }
 
   /**
@@ -945,127 +955,35 @@ export class SessionService {
 
   /**
    * Requests an 8-character pairing code for phone number pairing (alternative to QR scanning).
-   * Spawns a dedicated socket in 'pairing_code' authMode, terminates any conflicting QR socket,
-   * waits for socket stabilization, and requests the pairing code.
+   * Directly uses the active WASocket instance on demand.
    */
   public async requestPairingCode(sessionId: string, phoneNumber: string): Promise<string> {
     const sessionLog = createSessionLogger(sessionId);
 
     const cleanPhone = sanitizePhoneNumber(phoneNumber);
-    if (!cleanPhone || cleanPhone.length < 8) {
+    if (!cleanPhone || cleanPhone.length < 6) {
       sessionLog.warn({ rawPhone: phoneNumber, cleanPhone }, '[PairingCode] Invalid phone number provided');
       throw new Error('Invalid phone number. Must include country code and digits (e.g. 88017xxxxxxxx).');
     }
 
-    // Mark session in pairing mode to suppress any QR generation updates
-    this.pairingModeSessions.add(sessionId);
+    const session = this.getSession(sessionId);
+    if (!session || !session.sock) {
+      sessionLog.warn('[PairingCode] Session not found or socket not initialized');
+      throw new Error(`Session '${sessionId}' not found or socket not initialized.`);
+    }
 
-    const redis = await getRedisClient();
-    const currentSession = this.sessions.get(sessionId);
-    const existingSocket = currentSession?.sock || this.activeSockets.get(sessionId);
-    const existingMeta = this.metadataMap.get(sessionId);
-
-    // If socket is already connected & registered, reject pairing request
-    if (existingSocket && existingMeta?.status === 'connected') {
+    const sock = session.sock;
+    if (sock.authState?.creds?.registered) {
       sessionLog.warn('[PairingCode] Pairing request rejected: session is already registered and authenticated');
       throw new Error(`Session '${sessionId}' is already registered and authenticated.`);
     }
-
-    // Always ensure a completely fresh socket and uncorrupted identity keypair for phone pairing:
-    if (existingSocket) {
-      sessionLog.info(
-        { sessionId, previousMode: existingMeta?.authMode || currentSession?.authMode },
-        '[PairingCode] Terminating previous socket and purging unregistered Redis keys to prevent pre-key corruption'
-      );
-      try {
-        if ((existingSocket as any).ws && typeof (existingSocket as any).ws.close === 'function') {
-          (existingSocket as any).ws.close();
-        }
-        existingSocket.end(undefined);
-      } catch {
-        // Ignore termination error
-      }
-      this.activeSockets.delete(sessionId);
-      this.sessions.delete(sessionId);
-
-      // Wait 500ms for socket teardown
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    // Purge unregistered stale Redis session keys so Baileys generates a pristine identity keypair
-    try {
-      const purgedCount = await clearRedisSession(redis, sessionId);
-      sessionLog.info({ purgedCount }, '[PairingCode] Purged unregistered Redis credentials for fresh pairing keypair generation');
-    } catch {
-      // Ignore
-    }
-
-    // Spawn a fresh socket specifically in 'pairing_code' authMode
-    sessionLog.info(
-      { sessionId, phoneNumber: cleanPhone },
-      '[PairingCode] Spawning fresh Baileys socket in dedicated pairing_code authMode...'
-    );
-    await this.executeInitSession(sessionId, { authMode: 'pairing_code', phoneNumber: cleanPhone });
-
-    const newSession = this.sessions.get(sessionId);
-    const sock = newSession?.sock || this.activeSockets.get(sessionId);
-    if (!sock) {
-      sessionLog.error({ phoneNumber: cleanPhone }, '[PairingCode] Failed to initialize socket for pairing');
-      throw new Error(`Failed to initialize session '${sessionId}' for pairing code`);
-    }
-
-    if (sock.authState?.creds?.registered) {
-      sessionLog.warn('[PairingCode] Pairing request rejected: credentials are already registered');
-      throw new Error(`Session '${sessionId}' is already registered and authenticated.`);
-    }
-
-    // Ensure WebSocket is open before requesting pairing code
-    sessionLog.info(
-      { phoneNumber: cleanPhone, step: 'stabilizing_socket' },
-      '[PairingCode] Waiting for WebSocket connection to reach OPEN state...'
-    );
-    const waitForOpen = async (timeoutMs = 3000) => {
-      const start = Date.now();
-      while (Date.now() - start < timeoutMs) {
-        const activeSock = this.sessions.get(sessionId)?.sock || sock;
-        const ws = (activeSock as any)?.ws;
-        if (ws && (ws.readyState === 1 || ws.readyState === 'open')) {
-          return true;
-        }
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      return false;
-    };
-    await waitForOpen(3000);
 
     sessionLog.info(
       { phoneNumber: cleanPhone, step: 'request_sent', timestamp: new Date().toISOString() },
       '[PairingCode] Requesting 8-character pairing code from WhatsApp socket...'
     );
 
-    let rawCode: string | null = null;
-    let lastError: any = null;
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const activeSock = this.sessions.get(sessionId)?.sock || sock;
-        sessionLog.info({ attempt, phoneNumber: cleanPhone }, '[PairingCode] Attempting to request pairing code from WhatsApp...');
-        rawCode = await activeSock.requestPairingCode(cleanPhone);
-        if (rawCode) break;
-      } catch (err: any) {
-        lastError = err;
-        sessionLog.warn({ attempt, err: err.message }, '[PairingCode] Pairing code request attempt failed, retrying in 2000ms...');
-        if (attempt < 3) {
-          await new Promise((r) => setTimeout(r, 2000));
-        }
-      }
-    }
-
-    if (!rawCode) {
-      sessionLog.error({ err: lastError?.message, phoneNumber: cleanPhone }, '[PairingCode] All pairing code request attempts failed');
-      throw new Error(`Failed to generate pairing code: ${lastError?.message || 'WhatsApp socket connection unreachable'}`);
-    }
-
+    const rawCode = await sock.requestPairingCode(cleanPhone);
     const formattedCode = formatPairingCode(rawCode);
 
     sessionLog.info(
@@ -1075,11 +993,16 @@ export class SessionService {
         step: 'code_generated',
         timestamp: new Date().toISOString(),
       },
-      '[PairingCode] 8-character pairing code generated successfully. Enter on phone.'
+      '[PairingCode] 8-character pairing code generated successfully.'
     );
 
     this.logEvent('session_event', sessionId, {
       action: 'pairing_code_generated',
+      phoneNumber: cleanPhone,
+      code: formattedCode,
+    });
+
+    this.emitEvent(sessionId, 'pairing_code_generated', {
       phoneNumber: cleanPhone,
       code: formattedCode,
     });
@@ -1109,6 +1032,7 @@ export class SessionService {
 
     this.activeSockets.clear();
     this.sessions.clear();
+    this.qrCodes.clear();
     logger.info('[SessionService] All active sockets closed.');
   }
 
@@ -1118,7 +1042,7 @@ export class SessionService {
   public async logoutSession(sessionId: string): Promise<void> {
     const sessionLog = createSessionLogger(sessionId);
     this.terminatingSessions.add(sessionId);
-    this.pairingModeSessions.delete(sessionId);
+    this.qrCodes.delete(sessionId);
 
     const currentSession = this.sessions.get(sessionId);
     const sock = currentSession?.sock || this.activeSockets.get(sessionId);
@@ -1177,7 +1101,7 @@ export class SessionService {
     const sessionLog = createSessionLogger(sessionId);
 
     this.terminatingSessions.add(sessionId);
-    this.pairingModeSessions.delete(sessionId);
+    this.qrCodes.delete(sessionId);
 
     const currentSession = this.sessions.get(sessionId);
     const sock = currentSession?.sock || this.activeSockets.get(sessionId);

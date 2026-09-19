@@ -46,6 +46,7 @@ export interface SessionMetadata {
   reconnectAttempts: number;
   createdAt: number;
   lastActiveAt: number;
+  sock?: WASocket;
 }
 
 /**

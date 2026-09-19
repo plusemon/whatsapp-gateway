@@ -60,6 +60,7 @@ vi.mock('@whiskeysockets/baileys', async () => {
       restartRequired: 515,
       connectionClosed: 428,
       connectionLost: 408,
+      connectionReplaced: 440,
       badSession: 500,
       unavailableService: 503,
       multideviceMismatch: 411,
@@ -107,64 +108,40 @@ describe('Session State Guard & Anti-Overwrite (session.service.ts)', () => {
     sessionService = new SessionService();
   });
 
-  describe('Pairing Code Guard State', () => {
-    it('should register session into pairing guard registry when initialized with authMode: pairing_code', async () => {
-      const sessionId = 'session-pair-guard-1';
+  describe('Dual-Mode Authentication & Natural QR Emission', () => {
+    it('should naturally capture and emit QR code updates for any initialized session', async () => {
+      const sessionId = 'session-dual-auth-1';
 
-      const meta = await sessionService.initSession(sessionId, 'pairing_code');
+      const meta = await sessionService.initSession(sessionId);
+      expect(meta).not.toBeNull();
 
-      expect(meta.authMode).toBe('pairing_code');
-      expect(sessionService.isPairingMode(sessionId)).toBe(true);
-
-      const retrievedMeta = sessionService.getSession(sessionId);
-      expect(retrievedMeta).not.toBeNull();
-      expect(retrievedMeta?.authMode).toBe('pairing_code');
-    });
-
-    it('should suppress QR code events and NOT overwrite active pairing state when Baileys emits QR', async () => {
-      const sessionId = 'session-pair-guard-2';
-
-      await sessionService.initSession(sessionId, 'pairing_code');
-      expect(sessionService.isPairingMode(sessionId)).toBe(true);
-
-      // Simulate Baileys socket emitting a QR code update
-      mockSocketEv.emit('connection.update', {
-        qr: '2@FakeQRCodeDataStringFromWhatsApp123456789==,ABCDEF,1,1',
-      });
-
-      // Assert QR was suppressed and not stored
-      const currentMeta = sessionService.getSession(sessionId);
-      expect(currentMeta?.qr).toBeNull();
-      expect(currentMeta?.status).not.toBe('qr_ready');
-      expect(currentMeta?.authMode).toBe('pairing_code');
-
-      // getQR should return null for pairing_code mode
-      const qrValue = await sessionService.getQR(sessionId);
-      expect(qrValue).toBeNull();
-
-      // Ensure isPairingMode remained true
-      expect(sessionService.isPairingMode(sessionId)).toBe(true);
-    });
-
-    it('should allow QR code generation when session is explicitly in qr authMode', async () => {
-      const sessionId = 'session-qr-mode-1';
-
-      await sessionService.initSession(sessionId, 'qr');
-      expect(sessionService.isPairingMode(sessionId)).toBe(false);
-
-      // Simulate Baileys socket emitting QR code update
-      const sampleQr = '2@ValidQRCodeString==,ABC,1,1';
+      // Simulate Baileys socket emitting a natural QR code update
+      const sampleQr = '2@NaturalBaileysQRString123456789==,ABCDEF,1,1';
       mockSocketEv.emit('connection.update', {
         qr: sampleQr,
       });
 
+      // Assert QR was captured in qrCodes and metadata
+      expect(sessionService.qrCodes.get(sessionId)).toBe(sampleQr);
       const currentMeta = sessionService.getSession(sessionId);
       expect(currentMeta?.qr).toBe(sampleQr);
       expect(currentMeta?.status).toBe('qr_ready');
-      expect(currentMeta?.authMode).toBe('qr');
 
+      // getQR retrieves the natural QR code
       const qrValue = await sessionService.getQR(sessionId);
       expect(qrValue).toBe(sampleQr);
+    });
+
+    it('should request pairing code on-demand from the active socket', async () => {
+      const sessionId = 'session-dual-auth-2';
+
+      await sessionService.initSession(sessionId);
+      const session = sessionService.getSession(sessionId);
+      expect(session?.sock).toBeDefined();
+
+      const pairingCode = await sessionService.requestPairingCode(sessionId, '8801712345678');
+      expect(pairingCode).toBeDefined();
+      expect(pairingCode.length).toBeGreaterThan(0);
     });
   });
 
@@ -195,6 +172,31 @@ describe('Session State Guard & Anti-Overwrite (session.service.ts)', () => {
 
       // isPairingMode on terminating session returns false
       expect(sessionService.isPairingMode(sessionId)).toBe(false);
+    });
+
+    it('should safely handle Stream Errored (conflict) without purging Redis session keys', async () => {
+      const sessionId = 'session-conflict-guard-1';
+
+      await sessionService.initSession(sessionId, 'qr');
+      expect(sessionService.getSession(sessionId)).not.toBeNull();
+
+      // Simulate Baileys Stream Errored conflict
+      mockSocketEv.emit('connection.update', {
+        connection: 'close',
+        lastDisconnect: {
+          error: {
+            message: 'Stream Errored (conflict)',
+            output: { statusCode: 401 },
+          },
+        },
+      });
+
+      const session = sessionService.getSession(sessionId);
+      expect(session?.status).toBe('disconnected');
+      expect(session?.sock).toBeUndefined();
+      // Verify Redis session clear was not called as a true permanent logout
+      const { clearRedisSession } = await import('../../src/adapters/redisAuthState.js');
+      expect(clearRedisSession).not.toHaveBeenCalled();
     });
   });
 });

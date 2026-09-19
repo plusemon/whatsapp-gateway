@@ -63,32 +63,26 @@ export class SessionController {
   ): Promise<FastifyReply> {
     const { sessionId, phoneNumber } = request.body || {};
     if (!sessionId || !phoneNumber) {
-      return ResponseUtil.error(
-        reply,
-        'sessionId and phoneNumber are required.',
-        400,
-        'VALIDATION_ERROR'
-      );
+      return reply.status(400).send({
+        success: false,
+        error: 'sessionId and phoneNumber are required.',
+      });
+    }
+
+    const session = sessionService.getSession(sessionId);
+    if (!session || !session.sock) {
+      return reply.status(404).send({ success: false, error: 'Session not found' });
     }
 
     try {
       const formattedCode = await sessionService.requestPairingCode(sessionId, phoneNumber);
-      return ResponseUtil.success(
-        reply,
-        {
-          pairingCode: formattedCode,
-          expiresIn: 120,
-        },
-        200
-      );
+      return reply.send({ success: true, data: { pairingCode: formattedCode } });
     } catch (err: any) {
       request.log.error({ sessionId, phoneNumber, err: err.message }, 'Failed to generate pairing code v1');
-      return ResponseUtil.error(
-        reply,
-        err.message || 'Failed to request pairing code',
-        400,
-        'PAIRING_CODE_FAILED'
-      );
+      return reply.status(400).send({
+        success: false,
+        error: err.message || 'Failed to request pairing code',
+      });
     }
   }
 
@@ -278,18 +272,6 @@ export class SessionController {
         'SESSION_NOT_FOUND',
         null,
         { sessionId: id, qr: null, status: 'disconnected' }
-      );
-    }
-
-    // Strict Guard: If in pairing code mode, reject QR generation
-    if (meta.authMode === 'pairing_code' || sessionService.isPairingMode(id)) {
-      return ResponseUtil.error(
-        reply,
-        'Session is currently authenticated via pairing code. QR requests are disabled.',
-        409,
-        'PAIRING_MODE_ACTIVE',
-        null,
-        { sessionId: id, qr: null, status: meta.status, authMode: meta.authMode }
       );
     }
 

@@ -1,5 +1,6 @@
 /**
- * Botla WhatsApp Gateway - Frontend Application
+ * Botla WhatsApp Gateway - Developer Diagnostic Dashboard
+ * High-Density Dark-Mode Console (Postman-Lite + Live Terminal)
  * Zero-Build Vue 3 CDN (Composition API) Architecture
  */
 
@@ -13,1065 +14,1037 @@
 
   const { createApp, ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } = Vue;
 
-const app = createApp({
-  setup() {
-    // --------------------------------------------------------------------------
-    // 1. Navigation & Tab Views
-    // --------------------------------------------------------------------------
-    const activeTab = ref('sessions'); // 'sessions' | 'console' | 'live-logs'
-    const liveLogTab = ref('logs'); // 'logs' | 'events'
-    const consoleTab = ref('text'); // 'text' | 'media'
+  const app = createApp({
+    setup() {
+      // --------------------------------------------------------------------------
+      // 1. Navigation & Primary Views
+      // --------------------------------------------------------------------------
+      // 3 focused primary views: 'sessions' | 'console' | 'live-logs'
+      const activeTab = ref('sessions');
 
-    // --------------------------------------------------------------------------
-    // 2. Metrics & Telemetry
-    // --------------------------------------------------------------------------
-    const metrics = reactive({
-      activeSockets: 0,
-      statePersistence: 'Redis Adapter',
-      antiBan: 'Human Emulation',
-      gatewayStatus: 'Online',
-      redisStatus: 'checking',
-      waVersion: 'loading',
-      retention: '24h',
-      isRefreshing: false,
-    });
+      // --------------------------------------------------------------------------
+      // 2. Metrics & Compact Header State
+      // --------------------------------------------------------------------------
+      const metrics = reactive({
+        activeSockets: 0,
+        gatewayStatus: 'Online',
+        redisStatus: 'checking',
+        waVersion: 'v2.3000.x',
+        retention: '24h',
+        isRefreshing: false,
+      });
 
-    // --------------------------------------------------------------------------
-    // 3. Sessions State
-    // --------------------------------------------------------------------------
-    const sessions = ref([]);
-    const newTenantId = ref('tenant-botla-1');
-    const isBooting = ref(false);
+      // --------------------------------------------------------------------------
+      // 3. Sessions State & Inline Pairing
+      // --------------------------------------------------------------------------
+      const sessions = ref([]);
+      const newTenantId = ref('tenant-botla-1');
+      const isBooting = ref(false);
 
-    // --------------------------------------------------------------------------
-    // 4. Pairing Modal State
-    // --------------------------------------------------------------------------
-    const pairingModal = reactive({
-      isOpen: false,
-      sessionId: '',
-      mode: 'phone', // 'phone' | 'qr'
-      phoneNumber: '',
-      pairingCode: '',
-      qrImage: '',
-      qrStatus: 'connecting',
-      pollTimer: null,
-      isFetchingCode: false,
-      isConnected: false,
-      statusText: '',
-      copied: false,
-    });
+      // Inline pairing state per session (prevents disorienting modals)
+      // Keyed by sessionId: { isOpen, mode, phoneNumber, pairingCode, segments, qrImage, qrStatus, isFetchingCode, statusText, copied, pollTimer }
+      const inlinePairing = reactive({});
 
-    // --------------------------------------------------------------------------
-    // 5. Webhook Settings State
-    // --------------------------------------------------------------------------
-    const webhookModal = reactive({
-      isOpen: false,
-      enabled: false,
-      url: 'http://localhost:8000/api/whatsapp/webhook',
-      secret: '',
-      token: '',
-      showSecret: false,
-      events: { inbound: true, ack: true, status: true },
-      stats: { totalSent: 0, success: 0, failures: 0 },
-      source: 'GLOBAL',
-      isSaving: false,
-      pingStatus: null,
-      isPinging: false,
-      copied: false,
-    });
+      // Inline confirmation state for destructive actions (logout/purge)
+      const confirmAction = reactive({
+        type: null, // 'logout' | 'purge'
+        sessionId: null,
+        isProcessing: false,
+      });
 
-    // --------------------------------------------------------------------------
-    // 6. Console / Outbound Message & Media Dispatcher
-    // --------------------------------------------------------------------------
-    const quickSend = reactive({
-      sessionId: 'tenant-botla-1',
-      jid: '6281234567890@s.whatsapp.net',
-      text: 'Hello from Botla WhatsApp Gateway! 🚀',
-      isSending: false,
-      status: '',
-      statusType: '',
-    });
+      // --------------------------------------------------------------------------
+      // 4. View 2: API Console (Interactive Request Playground / Postman-Lite)
+      // --------------------------------------------------------------------------
+      const apiConsole = reactive({
+        action: 'text', // 'text' | 'media' | 'webhook'
+        sessionId: '',
+        destination: '6281234567890@s.whatsapp.net',
+        text: 'Hello from Botla WhatsApp Gateway! 🚀',
+        presence: true, // anti-ban presence simulation (composing + randomized jitter)
+        mediaType: 'image', // 'image' | 'document' | 'audio' | 'video'
+        mediaUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600',
+        caption: 'Diagnostic test asset attachment.',
+        filename: 'botla-test-document.pdf',
+        ptt: false,
+        webhookUrl: 'http://localhost:8000/api/whatsapp/webhook',
+        webhookSecret: '',
+        webhookToken: '',
+        webhookEvent: 'inbound_message',
+        isDispatching: false,
+        response: null, // { status, statusText, latencyMs, timestamp, method, endpoint, data, rawBody, copied }
+      });
 
-    const advancedSend = reactive({
-      sessionId: 'tenant-botla-1',
-      jid: '6281234567890@s.whatsapp.net',
-      text: 'Hello from Botla WhatsApp Gateway! 🚀',
-      isSending: false,
-      status: '',
-      statusType: '',
-    });
+      // --------------------------------------------------------------------------
+      // 5. View 3: Live Telemetry (Unified Terminal)
+      // --------------------------------------------------------------------------
+      const logs = ref([]);
+      const gatewayEvents = ref([]);
+      const telemetryFilter = ref('all'); // 'all' | 'inbound' | 'outbound' | 'ack' | 'error' | 'socket'
+      const telemetrySearch = ref('');
+      const autoScroll = ref(true);
+      const isPaused = ref(false);
+      // Non-destructive expansion map keyed by item id: { [id]: boolean }
+      const expandedLogIds = reactive({});
+      let sseSource = null;
+      let pollIntervals = [];
 
-    const mediaSend = reactive({
-      sessionId: 'tenant-botla-1',
-      jid: '6281234567890@s.whatsapp.net',
-      type: 'image',
-      url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=400',
-      caption: 'Here is your attached receipt.',
-      filename: 'monthly-statement.pdf',
-      ptt: false,
-      isSending: false,
-      status: '',
-      statusType: '',
-    });
+      // --------------------------------------------------------------------------
+      // 6. Toast Notifications
+      // --------------------------------------------------------------------------
+      const toasts = ref([]);
+      let toastIdCounter = 0;
 
-    // --------------------------------------------------------------------------
-    // 7. Confirmation Modals (Logout & Purge)
-    // --------------------------------------------------------------------------
-    const logoutModal = reactive({
-      isOpen: false,
-      sessionId: '',
-      isLoggingOut: false,
-    });
-
-    const purgeModal = reactive({
-      isOpen: false,
-      sessionId: '',
-      isPurging: false,
-    });
-
-    // --------------------------------------------------------------------------
-    // 8. Live Logs & Telemetry
-    // --------------------------------------------------------------------------
-    const logs = ref([]);
-    const gatewayEvents = ref([]);
-    const autoScroll = ref(true);
-    const eventsAutoScroll = ref(true);
-    const logLevelFilter = ref('all');
-    const logSessionFilter = ref('');
-    const logsPaused = ref(false);
-    const eventFilter = ref('all');
-    const eventSessionFilter = ref('');
-    const eventsPaused = ref(false);
-    let sseSource = null;
-    let pollIntervals = [];
-
-    // --------------------------------------------------------------------------
-    // 9. Toast Notifications
-    // --------------------------------------------------------------------------
-    const toasts = ref([]);
-    let toastIdCounter = 0;
-
-    const showToast = (message, type = 'info') => {
-      const id = ++toastIdCounter;
-      toasts.value.push({ id, message, type });
-      setTimeout(() => {
-        toasts.value = toasts.value.filter(t => t.id !== id);
-      }, 3500);
-    };
-
-    // --------------------------------------------------------------------------
-    // HTTP Helpers
-    // --------------------------------------------------------------------------
-    const getAuthHeaders = () => {
-      const apiKey = (typeof window !== 'undefined' && (localStorage.getItem('botla_api_key') || window.__BOTLA_API_KEY__)) || 'botla-gateway-api-key';
-      return {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
+      const showToast = (message, type = 'info') => {
+        const id = ++toastIdCounter;
+        toasts.value.push({ id, message, type });
+        setTimeout(() => {
+          toasts.value = toasts.value.filter((t) => t.id !== id);
+        }, 3200);
       };
-    };
 
-    const safeFetchJson = async (url, options = {}) => {
-      try {
-        const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
-        const res = await fetch(url, { ...options, headers });
-        const contentType = res.headers.get('content-type') || '';
-        if (!res.ok) {
-          if (contentType.includes('application/json')) {
-            const body = await res.json().catch(() => null);
-            return body || { success: false, status: res.status };
+      // --------------------------------------------------------------------------
+      // HTTP Helpers
+      // --------------------------------------------------------------------------
+      const getAuthHeaders = () => {
+        const apiKey =
+          (typeof window !== 'undefined' &&
+            (localStorage.getItem('botla_api_key') || window.__BOTLA_API_KEY__)) ||
+          'botla-gateway-api-key';
+        return {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+        };
+      };
+
+      const safeFetchJson = async (url, options = {}) => {
+        try {
+          const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
+          const res = await fetch(url, { ...options, headers });
+          const contentType = res.headers.get('content-type') || '';
+          if (!res.ok) {
+            if (contentType.includes('application/json')) {
+              const body = await res.json().catch(() => null);
+              return body || { success: false, status: res.status };
+            }
+            return { success: false, status: res.status, statusText: res.statusText };
           }
-          return { success: false, status: res.status, statusText: res.statusText };
+          if (!contentType.includes('application/json')) return null;
+          return await res.json();
+        } catch (err) {
+          console.warn(`[API Network Error] ${url}:`, err?.message || err);
+          return null;
         }
-        if (!contentType.includes('application/json')) return null;
-        return await res.json();
-      } catch (err) {
-        console.warn(`[API] Network notice on ${url}:`, err?.message || err);
-        return null;
-      }
-    };
+      };
 
-    // Formatting Helpers
-    const formatDisplayPhone = (jid) => {
-      if (!jid) return 'Awaiting authentication';
-      const raw = typeof jid === 'object' ? (jid.id || jid.jid || jid.phone || jid.name || '') : String(jid);
-      if (!raw) return 'Awaiting authentication';
-      const cleanNumber = raw.split('@')[0].split(':')[0].replace(/\D/g, '');
-      if (!cleanNumber) return raw;
-      return `+${cleanNumber.slice(0, 3)} ${cleanNumber.slice(3, 7)}-${cleanNumber.slice(7)}`;
-    };
-
-    const formatSessionTarget = (user) => {
-      if (!user) return 'Awaiting authentication';
-      if (typeof user === 'string') {
-        return formatDisplayPhone(user);
-      }
-      const phone = formatDisplayPhone(user.id || user.jid || user.phone);
-      const pushName = user.name || user.pushName || user.notify;
-      if (pushName && phone !== 'Awaiting authentication' && !phone.includes(pushName)) {
-        return `${phone} (${pushName})`;
-      }
-      if (pushName && phone === 'Awaiting authentication') {
-        return pushName;
-      }
-      return phone;
-    };
-
-    const getRelativeTime = (timestamp) => {
-      if (!timestamp) return '';
-      const now = Date.now();
-      const time = typeof timestamp === 'number' ? timestamp : new Date(timestamp).getTime();
-      const diffSec = Math.floor((now - time) / 1000);
-      if (diffSec < 5) return 'just now';
-      if (diffSec < 60) return `${diffSec}s ago`;
-      const diffMin = Math.floor(diffSec / 60);
-      if (diffMin < 60) return `${diffMin}m ago`;
-      const diffHr = Math.floor(diffMin / 60);
-      if (diffHr < 24) return `${diffHr}h ago`;
-      const diffDays = Math.floor(diffHr / 24);
-      return `${diffDays}d ago`;
-    };
-
-    const getClockTime = (timestamp) => {
-      if (!timestamp) return '';
-      const d = new Date(timestamp);
-      return isNaN(d.getTime()) ? '' : d.toLocaleTimeString();
-    };
-
-    const stripAnsi = (str) => {
-      if (!str) return '';
-      return str.replace(/\x1b\[[0-9;]*m/g, '');
-    };
-
-    // --------------------------------------------------------------------------
-    // Core Methods & Data Fetchers
-    // --------------------------------------------------------------------------
-    const fetchHealth = async () => {
-      const data = await safeFetchJson('/api/health');
-      if (data && data.success) {
-        metrics.gatewayStatus = 'Online';
-        metrics.redisStatus = data.redis?.status || (data.redis?.connected ? 'connected' : 'memory');
-        metrics.retention = data.storage?.mediaRetentionHours ? `${data.storage.mediaRetentionHours}h` : '24h';
-      } else {
-        metrics.gatewayStatus = 'Degraded';
-      }
-
-      const versionData = await safeFetchJson('/api/system/version');
-      if (versionData && versionData.success && versionData.data) {
-        metrics.waVersion = versionData.data.version || 'v2.3000.x';
-      }
-    };
-
-    const fetchSessions = async () => {
-      const data = await safeFetchJson('/api/sessions');
-      if (data && data.success) {
-        const list = data.data?.sessions || data.sessions || [];
-        sessions.value = list;
-        metrics.activeSockets = list.filter(s => s.status === 'connected').length;
-
-        // Keep quick send dropdown / default session updated
-        if (list.length > 0 && !list.find(s => s.id === quickSend.sessionId)) {
-          quickSend.sessionId = list[0].id;
-          advancedSend.sessionId = list[0].id;
-          mediaSend.sessionId = list[0].id;
-        }
-      }
-    };
-
-    const setSessionInput = (tenant) => {
-      newTenantId.value = tenant;
-    };
-
-    const initSession = async () => {
-      const id = newTenantId.value?.trim();
-      if (!id) {
-        showToast('Please specify a session identifier', 'warn');
-        return;
-      }
-
-      isBooting.value = true;
-      try {
-        const res = await safeFetchJson(`/api/sessions/${encodeURIComponent(id)}/init`, {
-          method: 'POST',
-          body: JSON.stringify({ authMode: 'pairing_code' }),
-        });
-
-        if (res && res.success) {
-          showToast(`Session '${id}' booted successfully!`, 'success');
-          await fetchSessions();
-          openPairing({ id, sessionId: id }, 'phone');
+      // --------------------------------------------------------------------------
+      // Formatting Helpers
+      // --------------------------------------------------------------------------
+      const formatDisplayPhone = (userOrJid) => {
+        if (!userOrJid) return 'Awaiting authentication';
+        let raw = '';
+        if (typeof userOrJid === 'object') {
+          raw = userOrJid.id || userOrJid.jid || userOrJid.phone || userOrJid.name || '';
         } else {
-          showToast(res?.error?.message || res?.message || 'Failed to initialize session', 'error');
+          raw = String(userOrJid);
         }
-      } catch (err) {
-        showToast(`Error initializing: ${err.message}`, 'error');
-      } finally {
-        isBooting.value = false;
-      }
-    };
-
-    // --------------------------------------------------------------------------
-    // Pairing Lifecycle & Polling Isolation
-    // --------------------------------------------------------------------------
-    const stopPairingTimers = () => {
-      if (pairingModal.pollTimer) {
-        clearInterval(pairingModal.pollTimer);
-        pairingModal.pollTimer = null;
-      }
-    };
-
-    const closePairingModal = () => {
-      stopPairingTimers();
-      pairingModal.isOpen = false;
-      pairingModal.pairingCode = '';
-      pairingModal.qrImage = '';
-      pairingModal.isConnected = false;
-      pairingModal.statusText = '';
-      pairingModal.isFetchingCode = false;
-    };
-
-    // Auto-stop QR polling if user switches to Phone Code mode
-    watch(() => pairingModal.mode, (newMode) => {
-      if (newMode !== 'qr') {
-        stopPairingTimers();
-      } else {
-        startQrPolling();
-      }
-    });
-
-    const fetchQrCode = async (sessionId) => {
-      if (!sessionId || pairingModal.mode !== 'qr') return;
-      const res = await safeFetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/qr`);
-      if (res && res.success && res.data) {
-        if (res.data.qrDataUrl) {
-          pairingModal.qrImage = res.data.qrDataUrl;
+        if (!raw) return 'Awaiting authentication';
+        const cleanNumber = raw.split('@')[0].split(':')[0].replace(/\D/g, '');
+        if (!cleanNumber) return raw;
+        if (cleanNumber.length >= 10) {
+          return `+${cleanNumber.slice(0, 3)} ${cleanNumber.slice(3, 7)}-${cleanNumber.slice(7)}`;
         }
-        pairingModal.qrStatus = res.data.status || 'qr_ready';
-        if (res.data.status === 'connected') {
-          pairingModal.isConnected = true;
-          stopPairingTimers();
-          showToast(`Session '${sessionId}' linked and connected!`, 'success');
-          setTimeout(() => closePairingModal(), 1500);
-          fetchSessions();
-        }
-      }
-    };
+        return `+${cleanNumber}`;
+      };
 
-    const startQrPolling = () => {
-      stopPairingTimers();
-      if (!pairingModal.sessionId) return;
-      pairingModal.qrImage = '';
-      pairingModal.qrStatus = 'connecting';
-      fetchQrCode(pairingModal.sessionId);
-      pairingModal.pollTimer = setInterval(() => {
-        if (pairingModal.mode === 'qr' && pairingModal.isOpen) {
-          fetchQrCode(pairingModal.sessionId);
+      const getUserPushName = (user) => {
+        if (!user || typeof user !== 'object') return null;
+        return user.name || user.pushName || user.notify || null;
+      };
+
+      const stripAnsi = (str) => {
+        if (!str) return '';
+        return String(str).replace(/\x1b\[[0-9;]*m/g, '');
+      };
+
+      const formatClockTime = (timestamp) => {
+        if (!timestamp) return '';
+        const d = new Date(timestamp);
+        return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      };
+
+      // --------------------------------------------------------------------------
+      // Core Data Fetchers
+      // --------------------------------------------------------------------------
+      const fetchHealth = async () => {
+        const data = await safeFetchJson('/api/health');
+        if (data && data.success) {
+          metrics.gatewayStatus = 'Online';
+          const rStatus = data.data?.redis || data.redis;
+          metrics.redisStatus = typeof rStatus === 'string' ? rStatus : rStatus?.status || (rStatus?.connected ? 'connected' : 'memory');
+          metrics.retention = (data.data?.mediaRetentionHours || data.storage?.mediaRetentionHours) ? `${data.data?.mediaRetentionHours || data.storage?.mediaRetentionHours}h` : '24h';
         } else {
-          stopPairingTimers();
+          metrics.gatewayStatus = 'Degraded';
         }
-      }, 3000);
-    };
 
-    const openPairing = (session, defaultMode = 'phone') => {
-      const sessId = session.sessionId || session.id;
-      pairingModal.sessionId = sessId;
-      pairingModal.mode = defaultMode;
-      pairingModal.phoneNumber = session.phone || '';
-      pairingModal.pairingCode = '';
-      pairingModal.qrImage = '';
-      pairingModal.isConnected = session.status === 'connected';
-      pairingModal.statusText = '';
-      pairingModal.isOpen = true;
+        const versionData = await safeFetchJson('/api/system/version');
+        if (versionData && versionData.success && versionData.data) {
+          metrics.waVersion = versionData.data.version || 'v2.3000.x';
+        }
+      };
 
-      if (defaultMode === 'qr') {
-        startQrPolling();
-      } else {
-        stopPairingTimers();
-      }
-    };
+      const fetchSessions = async () => {
+        metrics.isRefreshing = true;
+        try {
+          const data = await safeFetchJson('/api/sessions');
+          if (data && data.success) {
+            const list = data.data?.sessions || data.sessions || [];
+            sessions.value = list;
+            metrics.activeSockets = list.filter((s) => s.status === 'connected').length;
 
-    const requestPairingCode = async () => {
-      if (!pairingModal.phoneNumber || pairingModal.phoneNumber.trim().length < 6) {
-        showToast('Please enter a valid phone number with country code', 'warn');
-        return;
-      }
-      pairingModal.isFetchingCode = true;
-      pairingModal.statusText = 'Generating pairing code...';
-      stopPairingTimers(); // Ensure QR poll is terminated to prevent pre-key race condition
+            // Sync default target session in API Console
+            if (list.length > 0) {
+              const hasCurrent = list.some((s) => s.id === apiConsole.sessionId);
+              if (!hasCurrent) {
+                const connected = list.find((s) => s.status === 'connected');
+                apiConsole.sessionId = connected ? connected.id : list[0].id;
+              }
+            }
 
-      try {
-        let res = await safeFetchJson('/api/v1/sessions/pair-code', {
-          method: 'POST',
-          body: JSON.stringify({
-            sessionId: pairingModal.sessionId,
-            phoneNumber: pairingModal.phoneNumber.trim(),
-          }),
-        });
+            // Ensure inlinePairing state initialized for each session
+            list.forEach((s) => {
+              const sid = s.id;
+              if (!inlinePairing[sid]) {
+                inlinePairing[sid] = {
+                  isOpen: false,
+                  authTab: 'qr', // 'qr' | 'pair_code'
+                  mode: 'qr',
+                  phoneNumber: s.phone || '',
+                  pairingCode: '',
+                  pairingCodeSegments: [],
+                  qrImage: '',
+                  qrStatus: 'idle',
+                  isFetchingCode: false,
+                  statusText: '',
+                  copied: false,
+                  pollTimer: null,
+                };
+              }
+            });
+          }
+        } finally {
+          setTimeout(() => {
+            metrics.isRefreshing = false;
+          }, 350);
+        }
+      };
 
-        // Fallback to legacy endpoint if v1 returns non-success
-        if (!res || !res.success) {
-          res = await safeFetchJson(`/api/sessions/${encodeURIComponent(pairingModal.sessionId)}/pair-code`, {
+      const fetchWebhookSettings = async () => {
+        const res = await safeFetchJson('/api/settings/webhook');
+        if (res && res.success && res.data) {
+          if (res.data.url) apiConsole.webhookUrl = res.data.url;
+          if (res.data.secret) apiConsole.webhookSecret = res.data.secret;
+          if (res.data.token) apiConsole.webhookToken = res.data.token;
+        }
+      };
+
+      const fetchGatewayEvents = async () => {
+        if (isPaused.value) return;
+        const res = await safeFetchJson('/api/events');
+        if (res && Array.isArray(res.events)) {
+          gatewayEvents.value = res.events.map((evt, idx) => ({
+            ...evt,
+            id: evt.id || `evt-${idx}-${evt.timestamp || Date.now()}`,
+          }));
+        }
+      };
+
+      // --------------------------------------------------------------------------
+      // Boot Tenant Session
+      // --------------------------------------------------------------------------
+      const bootSession = async () => {
+        const id = newTenantId.value?.trim();
+        if (!id) {
+          showToast('Please specify a tenant identifier', 'warn');
+          return;
+        }
+
+        isBooting.value = true;
+        try {
+          // Attempt v1 init then fallback to legacy (default naturally to QR)
+          let res = await safeFetchJson('/api/v1/sessions/init', {
+            method: 'POST',
+            body: JSON.stringify({ sessionId: id, authMode: 'qr' }),
+          });
+
+          if (!res || !res.success) {
+            res = await safeFetchJson(`/api/sessions/${encodeURIComponent(id)}/init`, {
+              method: 'POST',
+              body: JSON.stringify({ authMode: 'qr' }),
+            });
+          }
+
+          if (res && res.success) {
+            showToast(`Tenant session '${id}' booted!`, 'success');
+            await fetchSessions();
+            // Automatically open inline pairing for this session
+            toggleInlinePairing(id, true);
+          } else {
+            showToast(res?.error?.message || res?.message || 'Failed to initialize session', 'error');
+          }
+        } catch (err) {
+          showToast(`Boot error: ${err.message}`, 'error');
+        } finally {
+          isBooting.value = false;
+        }
+      };
+
+      // --------------------------------------------------------------------------
+      // Inline Pairing Accordion & LifeCycle (Flexible Dual-Mode Auth)
+      // --------------------------------------------------------------------------
+      const stopSessionQrPoll = (sessionId) => {
+        const state = inlinePairing[sessionId];
+        if (state && state.pollTimer) {
+          clearInterval(state.pollTimer);
+          state.pollTimer = null;
+        }
+      };
+
+      const toggleInlinePairing = (sessionId, forceOpen = null) => {
+        if (!inlinePairing[sessionId]) {
+          inlinePairing[sessionId] = {
+            isOpen: false,
+            authTab: 'qr',
+            mode: 'qr',
+            phoneNumber: '',
+            pairingCode: '',
+            pairingCodeSegments: [],
+            qrImage: '',
+            qrStatus: 'idle',
+            isFetchingCode: false,
+            statusText: '',
+            copied: false,
+            pollTimer: null,
+          };
+        }
+
+        const state = inlinePairing[sessionId];
+        state.isOpen = forceOpen !== null ? forceOpen : !state.isOpen;
+
+        // When closed, stop polling; when open on QR tab, start poll
+        if (!state.isOpen) {
+          stopSessionQrPoll(sessionId);
+        } else if (state.authTab === 'qr' || state.mode === 'qr') {
+          startSessionQrPoll(sessionId);
+        }
+      };
+
+      const setAuthTab = (sessionId, tab) => {
+        const state = inlinePairing[sessionId];
+        if (!state) return;
+        state.authTab = tab;
+        state.mode = (tab === 'pair_code' || tab === 'phone') ? 'phone' : 'qr';
+        if (state.authTab === 'qr' || state.mode === 'qr') {
+          startSessionQrPoll(sessionId);
+        }
+      };
+
+      const setPairingMode = (sessionId, mode) => {
+        setAuthTab(sessionId, mode === 'phone' ? 'pair_code' : mode);
+      };
+
+      const fetchSessionQr = async (sessionId) => {
+        const state = inlinePairing[sessionId];
+        if (!state || (state.authTab !== 'qr' && state.mode !== 'qr')) return;
+        const res = await safeFetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/qr`);
+        if (res && res.success && res.data) {
+          if (res.data.qrDataUrl) {
+            state.qrImage = res.data.qrDataUrl;
+          }
+          state.qrStatus = res.data.status || 'qr_ready';
+          if (res.data.status === 'connected') {
+            stopSessionQrPoll(sessionId);
+            showToast(`Session '${sessionId}' linked!`, 'success');
+            state.isOpen = false;
+            fetchSessions();
+          }
+        }
+      };
+
+      const startSessionQrPoll = (sessionId) => {
+        stopSessionQrPoll(sessionId);
+        const state = inlinePairing[sessionId];
+        if (!state) return;
+        if (!state.qrImage) {
+          state.qrStatus = 'connecting';
+        }
+        fetchSessionQr(sessionId);
+        state.pollTimer = setInterval(() => {
+          if ((state.authTab === 'qr' || state.mode === 'qr') && state.isOpen) {
+            fetchSessionQr(sessionId);
+          } else {
+            stopSessionQrPoll(sessionId);
+          }
+        }, 3000);
+      };
+
+      const requestPairingCode = async (sessionId) => {
+        const state = inlinePairing[sessionId];
+        if (!state) return;
+
+        const cleanPhone = (state.phoneNumber || '').trim().replace(/\D/g, '');
+        if (cleanPhone.length < 6) {
+          showToast('Please enter a valid phone number with country code (e.g. 8801995329555)', 'warn');
+          return;
+        }
+
+        state.isFetchingCode = true;
+        state.statusText = 'Generating pairing code with desktop signature...';
+        // HARDENED RULE: Suppress any QR timers to avoid pre-key corruption race condition
+        stopSessionQrPoll(sessionId);
+
+        try {
+          let res = await safeFetchJson('/api/v1/sessions/pair-code', {
             method: 'POST',
             body: JSON.stringify({
-              phoneNumber: pairingModal.phoneNumber.trim(),
+              sessionId,
+              phoneNumber: cleanPhone,
             }),
           });
-        }
 
-        if (res && res.success) {
-          const code = res.data?.pairingCode || res.code || res.data?.code;
-          if (code) {
-            pairingModal.pairingCode = code;
-            pairingModal.statusText = 'Pairing code generated. Enter this into WhatsApp Linked Devices.';
-            showToast('Pairing code generated!', 'success');
-          } else {
-            pairingModal.statusText = 'Received response without code. Please try again.';
+          if (!res || !res.success) {
+            res = await safeFetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/pair-code`, {
+              method: 'POST',
+              body: JSON.stringify({
+                phoneNumber: cleanPhone,
+              }),
+            });
           }
-        } else {
-          const err = res?.error?.message || res?.message || 'Failed to request pairing code';
-          pairingModal.statusText = `Error: ${err}`;
-          showToast(err, 'error');
+
+          if (res && res.success) {
+            const rawCode = res.data?.pairingCode || res.code || res.data?.code || '';
+            if (rawCode) {
+              // Clean into 8 characters
+              const formatted = rawCode.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+              state.pairingCode = formatted.length === 8 ? `${formatted.slice(0, 4)}-${formatted.slice(4)}` : formatted;
+              // Build 8 segmented characters
+              const chars = formatted.slice(0, 8).split('');
+              state.pairingCodeSegments = chars;
+              state.statusText = 'Pairing code generated! Open WhatsApp > Linked Devices > Link with phone number.';
+              showToast('Pairing code generated!', 'success');
+            } else {
+              state.statusText = 'Received response without code. Please try again.';
+            }
+          } else {
+            const err = res?.error?.message || res?.message || 'Failed to request pairing code';
+            state.statusText = `Error: ${err}`;
+            showToast(err, 'error');
+          }
+        } catch (err) {
+          state.statusText = `Request error: ${err.message}`;
+          showToast(`Error: ${err.message}`, 'error');
+        } finally {
+          state.isFetchingCode = false;
         }
-      } catch (err) {
-        pairingModal.statusText = `Request error: ${err.message}`;
-        showToast(`Request failed: ${err.message}`, 'error');
-      } finally {
-        pairingModal.isFetchingCode = false;
-      }
-    };
+      };
 
-    // --------------------------------------------------------------------------
-    // Logout & Purge Modals
-    // --------------------------------------------------------------------------
-    const openLogoutModal = (sessionId) => {
-      logoutModal.sessionId = sessionId;
-      logoutModal.isOpen = true;
-    };
+      const copyPairingCode = (sessionId) => {
+        const state = inlinePairing[sessionId];
+        if (!state || !state.pairingCode) return;
+        const codeToCopy = state.pairingCode.replace(/-/g, '');
+        copyToClipboard(codeToCopy);
+        state.copied = true;
+        setTimeout(() => {
+          state.copied = false;
+        }, 1800);
+      };
 
-    const closeLogoutModal = () => {
-      logoutModal.isOpen = false;
-      logoutModal.sessionId = '';
-      logoutModal.isLoggingOut = false;
-    };
+      // --------------------------------------------------------------------------
+      // Disconnect & Purge Actions
+      // --------------------------------------------------------------------------
+      const promptConfirmAction = (type, sessionId) => {
+        confirmAction.type = type;
+        confirmAction.sessionId = sessionId;
+      };
 
-    const executeLogoutSession = async () => {
-      if (!logoutModal.sessionId) return;
-      logoutModal.isLoggingOut = true;
-      try {
-        const res = await safeFetchJson(`/api/sessions/${encodeURIComponent(logoutModal.sessionId)}/logout`, {
-          method: 'POST',
-          body: JSON.stringify({}),
-        });
-        if (res && res.success) {
-          showToast(`Session '${logoutModal.sessionId}' logged out successfully`, 'success');
-          closeLogoutModal();
-          await fetchSessions();
-        } else {
-          showToast(res?.error?.message || 'Failed to logout session', 'error');
+      const cancelConfirmAction = () => {
+        confirmAction.type = null;
+        confirmAction.sessionId = null;
+        confirmAction.isProcessing = false;
+      };
+
+      const executeConfirmAction = async () => {
+        const { type, sessionId } = confirmAction;
+        if (!type || !sessionId) return;
+
+        confirmAction.isProcessing = true;
+        try {
+          if (type === 'logout') {
+            // Disconnect / logout
+            let res = await safeFetchJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}/logout`, {
+              method: 'POST',
+              body: JSON.stringify({}),
+            });
+            if (!res || !res.success) {
+              res = await safeFetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/logout`, {
+                method: 'POST',
+                body: JSON.stringify({}),
+              });
+            }
+            if (res && res.success) {
+              showToast(`Session '${sessionId}' logged out cleanly`, 'success');
+              await fetchSessions();
+            } else {
+              showToast(res?.error?.message || 'Logout failed', 'error');
+            }
+          } else if (type === 'purge') {
+            // Purge memory and Redis keys
+            let res = await safeFetchJson(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+              method: 'DELETE',
+            });
+            if (!res || !res.success) {
+              res = await safeFetchJson(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+                method: 'DELETE',
+              });
+            }
+            if (!res || !res.success) {
+              res = await safeFetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/purge`, {
+                method: 'POST',
+                body: JSON.stringify({}),
+              });
+            }
+            if (res && res.success) {
+              showToast(`Session '${sessionId}' purged`, 'success');
+              stopSessionQrPoll(sessionId);
+              delete inlinePairing[sessionId];
+              await fetchSessions();
+            } else {
+              showToast(res?.error?.message || 'Purge failed', 'error');
+            }
+          }
+        } catch (err) {
+          showToast(`Action failed: ${err.message}`, 'error');
+        } finally {
+          cancelConfirmAction();
         }
-      } catch (err) {
-        showToast(`Logout failed: ${err.message}`, 'error');
-      } finally {
-        logoutModal.isLoggingOut = false;
-      }
-    };
+      };
 
-    const openPurgeModal = (sessionId) => {
-      purgeModal.sessionId = sessionId;
-      purgeModal.isOpen = true;
-    };
+      // --------------------------------------------------------------------------
+      // Quick Transition to API Console
+      // --------------------------------------------------------------------------
+      const jumpToApiConsole = (session) => {
+        const sid = session.id || session.sessionId;
+        apiConsole.sessionId = sid;
+        activeTab.value = 'console';
+        showToast(`API Console opened with session '${sid}'`, 'info');
+      };
 
-    const closePurgeModal = () => {
-      purgeModal.isOpen = false;
-      purgeModal.sessionId = '';
-      purgeModal.isPurging = false;
-    };
+      // --------------------------------------------------------------------------
+      // View 2: API Console Request Execution
+      // --------------------------------------------------------------------------
+      const dispatchApiRequest = async () => {
+        if (!apiConsole.sessionId && apiConsole.action !== 'webhook') {
+          showToast('Please select a target session', 'warn');
+          return;
+        }
 
-    const executePurgeSession = async () => {
-      if (!purgeModal.sessionId) return;
-      purgeModal.isPurging = true;
-      try {
-        let res = await safeFetchJson(`/api/sessions/${encodeURIComponent(purgeModal.sessionId)}`, {
-          method: 'DELETE',
+        apiConsole.isDispatching = true;
+        apiConsole.response = null;
+
+        const startTime = performance.now();
+        let targetUrl = '';
+        let reqMethod = 'POST';
+        let reqBody = {};
+
+        try {
+          if (apiConsole.action === 'text') {
+            targetUrl = '/api/v1/messages/send-text';
+            reqBody = {
+              sessionId: apiConsole.sessionId,
+              to: apiConsole.destination.trim(),
+              message: apiConsole.text.trim(),
+              presence: !!apiConsole.presence,
+            };
+          } else if (apiConsole.action === 'media') {
+            targetUrl = '/api/v1/messages/send-media';
+            reqBody = {
+              sessionId: apiConsole.sessionId,
+              to: apiConsole.destination.trim(),
+              mediaType: apiConsole.mediaType,
+              mediaUrl: apiConsole.mediaUrl.trim(),
+              caption: apiConsole.caption ? apiConsole.caption.trim() : undefined,
+              fileName: apiConsole.filename ? apiConsole.filename.trim() : undefined,
+            };
+          } else if (apiConsole.action === 'webhook') {
+            targetUrl = '/api/settings/webhook/test';
+            reqBody = {
+              url: apiConsole.webhookUrl.trim(),
+              secret: apiConsole.webhookSecret,
+              token: apiConsole.webhookToken,
+            };
+          }
+
+          const headers = { ...getAuthHeaders() };
+          const res = await fetch(targetUrl, {
+            method: reqMethod,
+            headers,
+            body: JSON.stringify(reqBody),
+          });
+
+          const latencyMs = Math.round(performance.now() - startTime);
+          const contentType = res.headers.get('content-type') || '';
+          let data = null;
+
+          if (contentType.includes('application/json')) {
+            data = await res.json().catch(() => ({ error: 'Failed to parse JSON response' }));
+          } else {
+            const rawText = await res.text().catch(() => '');
+            data = { rawText };
+          }
+
+          // Capture headers summary
+          const respHeaders = {
+            'content-type': contentType,
+            'x-ratelimit-remaining': res.headers.get('x-ratelimit-remaining') || undefined,
+            'x-request-id': res.headers.get('x-request-id') || undefined,
+          };
+
+          apiConsole.response = {
+            status: res.status,
+            statusText: res.statusText || (res.status === 200 ? 'OK' : 'Response'),
+            latencyMs,
+            timestamp: new Date().toISOString(),
+            method: reqMethod,
+            endpoint: targetUrl,
+            headers: respHeaders,
+            data,
+            rawBody: JSON.stringify(data, null, 2),
+            copied: false,
+          };
+
+          if (res.ok && (data?.success !== false)) {
+            showToast(`Request successful (${latencyMs}ms)`, 'success');
+          } else {
+            showToast(`Request returned HTTP ${res.status}`, 'warn');
+          }
+        } catch (err) {
+          const latencyMs = Math.round(performance.now() - startTime);
+          apiConsole.response = {
+            status: 0,
+            statusText: 'Network Error',
+            latencyMs,
+            timestamp: new Date().toISOString(),
+            method: reqMethod,
+            endpoint: targetUrl,
+            headers: {},
+            data: { success: false, error: err.message },
+            rawBody: JSON.stringify({ error: err.message }, null, 2),
+            copied: false,
+          };
+          showToast(`Dispatch failed: ${err.message}`, 'error');
+        } finally {
+          apiConsole.isDispatching = false;
+        }
+      };
+
+      const copyApiResponse = () => {
+        if (!apiConsole.response || !apiConsole.response.rawBody) return;
+        copyToClipboard(apiConsole.response.rawBody);
+        apiConsole.response.copied = true;
+        setTimeout(() => {
+          if (apiConsole.response) apiConsole.response.copied = false;
+        }, 1800);
+      };
+
+      // --------------------------------------------------------------------------
+      // View 3: Live Telemetry Stream Processing & Non-Destructive Expansion
+      // --------------------------------------------------------------------------
+      const initSSE = () => {
+        if (sseSource) {
+          try {
+            sseSource.close();
+          } catch {}
+        }
+
+        try {
+          sseSource = new EventSource('/api/logs/stream');
+
+          sseSource.onmessage = (event) => {
+            if (!event.data) return;
+            try {
+              const payload = JSON.parse(event.data);
+
+              // Auto-resolve pairing if connected event fires for session
+              const action = payload.action || payload.meta?.action || payload.event;
+              const targetSession = payload.sessionId || payload.meta?.sessionId;
+
+              if (
+                (action === 'session_connected' ||
+                  action === 'connected' ||
+                  (payload.message && payload.message.includes('successfully connected'))) &&
+                targetSession
+              ) {
+                if (inlinePairing[targetSession]) {
+                  inlinePairing[targetSession].isOpen = false;
+                  stopSessionQrPoll(targetSession);
+                }
+                showToast(`Session '${targetSession}' linked & connected!`, 'success');
+                fetchSessions();
+              }
+
+              if (payload.type === 'gateway_event') {
+                if (!isPaused.value) {
+                  const evId = payload.id || `evt-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+                  gatewayEvents.value.unshift({ ...payload, id: evId });
+                  if (gatewayEvents.value.length > 200) gatewayEvents.value.pop();
+                }
+              } else {
+                if (!isPaused.value) {
+                  const logId = payload.id || `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+                  logs.value.unshift({ ...payload, id: logId });
+                  if (logs.value.length > 300) logs.value.pop();
+                }
+              }
+
+              if (autoScroll.value && !isPaused.value) {
+                nextTick(() => {
+                  const container = document.getElementById('telemetry-terminal-feed');
+                  if (container) container.scrollTop = 0;
+                });
+              }
+            } catch {
+              // Heartbeat
+            }
+          };
+
+          sseSource.onerror = () => {
+            // EventSource auto-reconnects
+          };
+        } catch (err) {
+          console.warn('SSE stream unavailable:', err);
+        }
+      };
+
+      // Level badge class resolver for compact telemetry badges
+      const getLevelBadgeClass = (level) => {
+        const l = (level || '').toLowerCase();
+        if (l === 'error' || l === 'fatal') {
+          return 'bg-rose-500/20 text-rose-300 border border-rose-500/30';
+        }
+        if (l === 'warn') {
+          return 'bg-amber-500/20 text-amber-300 border border-amber-500/30';
+        }
+        if (l === 'inbound') {
+          return 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+        }
+        if (l === 'outbound') {
+          return 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30';
+        }
+        if (l === 'ack') {
+          return 'bg-purple-500/20 text-purple-300 border border-purple-500/30';
+        }
+        if (l === 'socket') {
+          return 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30';
+        }
+        return 'bg-slate-800 text-slate-300 border border-slate-700/60';
+      };
+
+      // Unified Telemetry stream that maps logs & gateway events into a standardized item
+      const unifiedStream = computed(() => {
+        const combined = [];
+
+        // Map logs
+        logs.value.forEach((l) => {
+          const rawMsg = l.message || l.msg || '';
+          const msg = stripAnsi(rawMsg);
+          const lvl = (l.level || 'info').toLowerCase();
+          let kind = 'info';
+          let levelLabel = 'INFO';
+          if (lvl === 'error' || lvl === 'fatal') {
+            kind = 'error';
+            levelLabel = 'ERROR';
+          } else if (lvl === 'warn') {
+            kind = 'warn';
+            levelLabel = 'WARN';
+          } else {
+            levelLabel = lvl.toUpperCase();
+          }
+
+          const ts = l.timestamp || new Date().toISOString();
+          const timeFormatted = formatClockTime(ts);
+          const metaPayload = l.meta || l.payload || (Object.keys(l).length > 4 ? l : null);
+          const itemId = l.id || `log-${ts}`;
+
+          combined.push({
+            id: itemId,
+            timestamp: ts,
+            timeFormatted,
+            kind, // 'info' | 'warn' | 'error' | 'inbound' | 'outbound' | 'ack' | 'socket'
+            level: lvl,
+            levelLabel,
+            tag: levelLabel,
+            sessionId: l.sessionId || l.meta?.sessionId || null,
+            message: msg,
+            msg,
+            meta: metaPayload,
+            payload: metaPayload,
+            get expanded() {
+              return !!expandedLogIds[itemId];
+            },
+            set expanded(val) {
+              expandedLogIds[itemId] = !!val;
+            },
+            source: 'log',
+          });
         });
-        if (!res || !res.success) {
-          res = await safeFetchJson(`/api/sessions/${encodeURIComponent(purgeModal.sessionId)}/purge`, {
-            method: 'POST',
-            body: JSON.stringify({}),
+
+        // Map gateway events
+        gatewayEvents.value.forEach((e) => {
+          const type = (e.type || '').toLowerCase();
+          let kind = 'socket';
+          let level = 'socket';
+          let levelLabel = 'EVENT';
+
+          if (type.includes('inbound') || e.event === 'message.received') {
+            kind = 'inbound';
+            level = 'inbound';
+            levelLabel = 'INBOUND';
+          } else if (type.includes('outbound') || e.event === 'message.sent') {
+            kind = 'outbound';
+            level = 'outbound';
+            levelLabel = 'OUTBOUND';
+          } else if (type.includes('ack') || e.event === 'message.ack') {
+            kind = 'ack';
+            level = 'ack';
+            levelLabel = 'ACK';
+          } else if (type.includes('error')) {
+            kind = 'error';
+            level = 'error';
+            levelLabel = 'ERROR';
+          } else if (type.includes('session') || e.event === 'session.state') {
+            kind = 'socket';
+            level = 'socket';
+            levelLabel = 'SOCKET';
+          }
+
+          const ts = e.timestamp || new Date().toISOString();
+          const timeFormatted = formatClockTime(ts);
+          const rawMsg = e.message || e.msg || e.event || `${levelLabel} event received`;
+          const msg = stripAnsi(rawMsg);
+          const metaPayload = e.payload || e.meta || e.details || e;
+          const itemId = e.id || `evt-${ts}`;
+
+          combined.push({
+            id: itemId,
+            timestamp: ts,
+            timeFormatted,
+            kind,
+            level,
+            levelLabel,
+            tag: levelLabel,
+            sessionId: e.sessionId || null,
+            message: msg,
+            msg,
+            meta: metaPayload,
+            payload: metaPayload,
+            get expanded() {
+              return !!expandedLogIds[itemId];
+            },
+            set expanded(val) {
+              expandedLogIds[itemId] = !!val;
+            },
+            source: 'event',
+          });
+        });
+
+        // Sort descending by timestamp
+        combined.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+        // Apply filters
+        let result = combined;
+        if (telemetryFilter.value !== 'all') {
+          result = result.filter((item) => {
+            if (telemetryFilter.value === 'inbound') return item.kind === 'inbound';
+            if (telemetryFilter.value === 'outbound') return item.kind === 'outbound';
+            if (telemetryFilter.value === 'ack') return item.kind === 'ack';
+            if (telemetryFilter.value === 'error') return item.kind === 'error' || item.kind === 'warn';
+            if (telemetryFilter.value === 'socket') return item.kind === 'socket' || item.kind === 'info';
+            return true;
           });
         }
 
-        if (res && res.success) {
-          showToast(`Session '${purgeModal.sessionId}' purged from memory and Redis`, 'success');
-          closePurgeModal();
-          await fetchSessions();
-        } else {
-          showToast(res?.error?.message || 'Failed to purge session', 'error');
+        if (telemetrySearch.value.trim()) {
+          const q = telemetrySearch.value.trim().toLowerCase();
+          result = result.filter(
+            (item) =>
+              (item.message && item.message.toLowerCase().includes(q)) ||
+              (item.sessionId && item.sessionId.toLowerCase().includes(q)) ||
+              (item.tag && item.tag.toLowerCase().includes(q))
+          );
         }
-      } catch (err) {
-        showToast(`Purge failed: ${err.message}`, 'error');
-      } finally {
-        purgeModal.isPurging = false;
-      }
-    };
 
-    // --------------------------------------------------------------------------
-    // Console Message Dispatchers
-    // --------------------------------------------------------------------------
-    const openTestSend = (session) => {
-      const id = session.sessionId || session.id;
-      quickSend.sessionId = id;
-      advancedSend.sessionId = id;
-      mediaSend.sessionId = id;
-      activeTab.value = 'console';
-    };
-
-    const sendQuickMessage = async () => {
-      if (!quickSend.sessionId || !quickSend.jid || !quickSend.text) {
-        showToast('Please complete all required fields', 'warn');
-        return;
-      }
-      quickSend.isSending = true;
-      quickSend.status = 'Emulating typing presence & dispatching...';
-      quickSend.statusType = 'info';
-
-      try {
-        const res = await safeFetchJson(`/api/sessions/${encodeURIComponent(quickSend.sessionId)}/send`, {
-          method: 'POST',
-          body: JSON.stringify({
-            jid: quickSend.jid.trim(),
-            text: quickSend.text.trim(),
-          }),
-        });
-
-        if (res && res.success) {
-          quickSend.status = 'Message dispatched successfully!';
-          quickSend.statusType = 'success';
-          showToast('Message dispatched successfully!', 'success');
-        } else {
-          const msg = res?.error?.message || res?.message || 'Failed to send message';
-          quickSend.status = `Failed: ${msg}`;
-          quickSend.statusType = 'error';
-          showToast(msg, 'error');
-        }
-      } catch (err) {
-        quickSend.status = `Error: ${err.message}`;
-        quickSend.statusType = 'error';
-        showToast(err.message, 'error');
-      } finally {
-        quickSend.isSending = false;
-      }
-    };
-
-    const sendAdvancedMessage = async () => {
-      if (!advancedSend.sessionId || !advancedSend.jid || !advancedSend.text) {
-        showToast('Please complete all required fields', 'warn');
-        return;
-      }
-      advancedSend.isSending = true;
-      advancedSend.status = 'Emulating user typing presence...';
-      advancedSend.statusType = 'info';
-
-      try {
-        const res = await safeFetchJson(`/api/sessions/${encodeURIComponent(advancedSend.sessionId)}/send`, {
-          method: 'POST',
-          body: JSON.stringify({
-            jid: advancedSend.jid.trim(),
-            text: advancedSend.text.trim(),
-          }),
-        });
-
-        if (res && res.success) {
-          advancedSend.status = 'Message delivered to Baileys socket queue.';
-          advancedSend.statusType = 'success';
-          showToast('Text message dispatched', 'success');
-        } else {
-          const msg = res?.error?.message || res?.message || 'Failed to send message';
-          advancedSend.status = `Error: ${msg}`;
-          advancedSend.statusType = 'error';
-          showToast(msg, 'error');
-        }
-      } catch (err) {
-        advancedSend.status = `Error: ${err.message}`;
-        advancedSend.statusType = 'error';
-        showToast(err.message, 'error');
-      } finally {
-        advancedSend.isSending = false;
-      }
-    };
-
-    const sendMediaMessage = async () => {
-      if (!mediaSend.sessionId || !mediaSend.jid || !mediaSend.url) {
-        showToast('Session, destination, and media URL are required', 'warn');
-        return;
-      }
-      mediaSend.isSending = true;
-      mediaSend.status = 'Downloading remote asset, verifying MIME, and transmitting...';
-      mediaSend.statusType = 'info';
-
-      try {
-        const res = await safeFetchJson(`/api/sessions/${encodeURIComponent(mediaSend.sessionId)}/send-media`, {
-          method: 'POST',
-          body: JSON.stringify({
-            jid: mediaSend.jid.trim(),
-            type: mediaSend.type,
-            url: mediaSend.url.trim(),
-            caption: mediaSend.caption || undefined,
-            filename: mediaSend.filename || undefined,
-            ptt: mediaSend.ptt || false,
-          }),
-        });
-
-        if (res && res.success) {
-          mediaSend.status = 'Media payload successfully dispatched!';
-          mediaSend.statusType = 'success';
-          showToast('Media attachment dispatched', 'success');
-        } else {
-          const msg = res?.error?.message || res?.message || 'Failed to dispatch media';
-          mediaSend.status = `Error: ${msg}`;
-          mediaSend.statusType = 'error';
-          showToast(msg, 'error');
-        }
-      } catch (err) {
-        mediaSend.status = `Error: ${err.message}`;
-        mediaSend.statusType = 'error';
-        showToast(err.message, 'error');
-      } finally {
-        mediaSend.isSending = false;
-      }
-    };
-
-    // --------------------------------------------------------------------------
-    // Webhook Settings Modal & Test Ping
-    // --------------------------------------------------------------------------
-    const loadWebhookSettings = async () => {
-      const res = await safeFetchJson('/api/settings/webhook');
-      if (res && res.success && res.data) {
-        const d = res.data;
-        webhookModal.url = d.url || '';
-        webhookModal.enabled = !!d.enabled;
-        webhookModal.secret = d.secret || '';
-        webhookModal.token = d.token || '';
-        webhookModal.source = d.source || 'GLOBAL';
-        if (d.events) {
-          webhookModal.events.inbound = d.events.inbound ?? true;
-          webhookModal.events.ack = d.events.ack ?? true;
-          webhookModal.events.status = d.events.status ?? true;
-        }
-        if (d.retryStats) {
-          webhookModal.stats.totalSent = d.retryStats.totalSent || 0;
-          webhookModal.stats.success = d.retryStats.successCount || 0;
-          webhookModal.stats.failures = d.retryStats.failCount || 0;
-        }
-      }
-    };
-
-    const openWebhookSettingsModal = async () => {
-      webhookModal.isOpen = true;
-      webhookModal.pingStatus = null;
-      await loadWebhookSettings();
-    };
-
-    const closeWebhookSettingsModal = () => {
-      webhookModal.isOpen = false;
-      webhookModal.pingStatus = null;
-    };
-
-    const saveWebhookSettings = async () => {
-      webhookModal.isSaving = true;
-      try {
-        const res = await safeFetchJson('/api/settings/webhook', {
-          method: 'POST',
-          body: JSON.stringify({
-            url: webhookModal.url?.trim(),
-            secret: webhookModal.secret,
-            token: webhookModal.token,
-            enabled: webhookModal.enabled,
-            events: webhookModal.events,
-          }),
-        });
-
-        if (res && res.success) {
-          showToast('Webhook settings saved successfully', 'success');
-          closeWebhookSettingsModal();
-        } else {
-          showToast(res?.error?.message || 'Failed to save settings', 'error');
-        }
-      } catch (err) {
-        showToast(`Save error: ${err.message}`, 'error');
-      } finally {
-        webhookModal.isSaving = false;
-      }
-    };
-
-    const testWebhookPing = async () => {
-      webhookModal.isPinging = true;
-      webhookModal.pingStatus = null;
-      try {
-        const res = await safeFetchJson('/api/settings/webhook/test', {
-          method: 'POST',
-          body: JSON.stringify({
-            url: webhookModal.url?.trim(),
-            secret: webhookModal.secret,
-            token: webhookModal.token,
-          }),
-        });
-
-        if (res && res.success && res.data) {
-          webhookModal.pingStatus = res.data;
-          showToast(res.data.success ? `Ping successful (${res.data.latencyMs}ms)` : `Ping failed: ${res.data.error}`, res.data.success ? 'success' : 'error');
-        } else {
-          webhookModal.pingStatus = { success: false, statusCode: 500, latencyMs: 0, error: res?.error?.message || 'Failed to reach endpoint' };
-          showToast('Ping failed', 'error');
-        }
-      } catch (err) {
-        webhookModal.pingStatus = { success: false, statusCode: 500, latencyMs: 0, error: err.message };
-        showToast(`Ping error: ${err.message}`, 'error');
-      } finally {
-        webhookModal.isPinging = false;
-      }
-    };
-
-    // --------------------------------------------------------------------------
-    // SSE Live Logging & Telemetry Streams
-    // --------------------------------------------------------------------------
-    const fetchEvents = async () => {
-      if (eventsPaused.value) return;
-      const res = await safeFetchJson('/api/events');
-      if (res && Array.isArray(res.events)) {
-        // Merge preserving expanded states
-        const existingMap = new Map(gatewayEvents.value.map(e => [e.id, e.expanded]));
-        gatewayEvents.value = res.events.map((evt, idx) => ({
-          ...evt,
-          id: evt.id || `evt-${idx}-${evt.timestamp}`,
-          expanded: existingMap.get(evt.id) || false,
-        }));
-      }
-    };
-
-    const initSSE = () => {
-      if (sseSource) {
-        try { sseSource.close(); } catch {}
-      }
-
-      try {
-        sseSource = new EventSource('/api/logs/stream');
-
-        sseSource.onmessage = (event) => {
-          if (!event.data) return;
-          try {
-            const payload = JSON.parse(event.data);
-
-            // Handle session_connected event to auto-resolve modal
-            const action = payload.action || payload.meta?.action || payload.event;
-            const targetSession = payload.sessionId || payload.meta?.sessionId;
-
-            if (
-              (action === 'session_connected' || action === 'connected' || (payload.message && payload.message.includes('successfully connected'))) &&
-              targetSession &&
-              pairingModal.sessionId === targetSession
-            ) {
-              pairingModal.isConnected = true;
-              stopPairingTimers();
-              showToast(`Device for session '${targetSession}' linked!`, 'success');
-              setTimeout(() => closePairingModal(), 1500);
-              fetchSessions();
-            }
-
-            if (payload.type === 'gateway_event') {
-              if (!eventsPaused.value) {
-                gatewayEvents.value.unshift({ ...payload, id: Date.now() + Math.random(), expanded: false });
-                if (gatewayEvents.value.length > 250) gatewayEvents.value.pop();
-              }
-            } else {
-              if (!logsPaused.value) {
-                logs.value.unshift({
-                  ...payload,
-                  id: payload.id || `log-${Date.now()}-${Math.random()}`,
-                  expanded: false,
-                });
-                if (logs.value.length > 300) logs.value.pop();
-              }
-            }
-
-            if (autoScroll.value) {
-              nextTick(() => {
-                const el = document.getElementById('log-stream-container');
-                if (el) el.scrollTop = 0;
-              });
-            }
-          } catch {
-            // Plain text heartbeat fallback
-          }
-        };
-
-        sseSource.onerror = () => {
-          // Reconnection is automatic in EventSource
-        };
-      } catch (err) {
-        console.warn('SSE initialization failed, falling back to background polling', err);
-      }
-    };
-
-    // --------------------------------------------------------------------------
-    // Filtered Computeds
-    // --------------------------------------------------------------------------
-    const filteredLogs = computed(() => {
-      let list = logs.value;
-      if (logLevelFilter.value !== 'all') {
-        list = list.filter(l => (l.level || '').toLowerCase() === logLevelFilter.value);
-      }
-      if (logSessionFilter.value.trim()) {
-        const query = logSessionFilter.value.trim().toLowerCase();
-        list = list.filter(l => (l.sessionId || '').toLowerCase().includes(query) || (l.message || '').toLowerCase().includes(query));
-      }
-      return list;
-    });
-
-    const filteredEvents = computed(() => {
-      let list = gatewayEvents.value;
-      if (eventFilter.value !== 'all') {
-        list = list.filter(e => {
-          const type = (e.type || '').toLowerCase();
-          if (eventFilter.value === 'inbound') return type.includes('inbound');
-          if (eventFilter.value === 'outbound') return type.includes('outbound');
-          if (eventFilter.value === 'ack') return type.includes('ack');
-          if (eventFilter.value === 'webhook') return type.includes('webhook');
-          if (eventFilter.value === 'session') return type.includes('session');
-          return true;
-        });
-      }
-      if (eventSessionFilter.value.trim()) {
-        const query = eventSessionFilter.value.trim().toLowerCase();
-        list = list.filter(e => (e.sessionId || '').toLowerCase().includes(query));
-      }
-      return list;
-    });
-
-    // --------------------------------------------------------------------------
-    // Clipboard & Utility Actions
-    // --------------------------------------------------------------------------
-    const copyToClipboard = async (text, item = null) => {
-      try {
-        const content = typeof text === 'object' ? JSON.stringify(text, null, 2) : String(text);
-        await navigator.clipboard.writeText(content);
-        if (item) {
-          item.copied = true;
-          setTimeout(() => { item.copied = false; }, 1500);
-        }
-        showToast('Copied to clipboard', 'info');
-      } catch {
-        showToast('Failed to copy to clipboard', 'error');
-      }
-    };
-
-    const copyAllLogs = (format = 'text') => {
-      const list = filteredLogs.value;
-      if (!list || list.length === 0) {
-        showToast('No logs to copy', 'warn');
-        return;
-      }
-      let content = '';
-      if (format === 'json') {
-        content = JSON.stringify(list, null, 2);
-      } else {
-        content = list.map(l => `[${l.timestamp || ''}] [${(l.level || 'INFO').toUpperCase()}] ${l.sessionId ? `[${l.sessionId}] ` : ''}${stripAnsi(l.message || '')}`).join('\n');
-      }
-      copyToClipboard(content);
-    };
-
-    const copyAllEvents = () => {
-      const list = filteredEvents.value;
-      if (!list || list.length === 0) {
-        showToast('No events to copy', 'warn');
-        return;
-      }
-      copyToClipboard(JSON.stringify(list, null, 2));
-    };
-
-    const clearLogs = () => {
-      logs.value = [];
-      showToast('Log buffer cleared');
-    };
-
-    const clearEvents = () => {
-      gatewayEvents.value = [];
-      showToast('Events buffer cleared');
-    };
-
-    const manualRefreshAll = async () => {
-      metrics.isRefreshing = true;
-      try {
-        await Promise.all([
-          fetchHealth(),
-          fetchSessions(),
-          loadWebhookSettings(),
-          fetchEvents(),
-        ]);
-        showToast('Telemetry & sessions refreshed', 'info');
-      } finally {
-        setTimeout(() => { metrics.isRefreshing = false; }, 400);
-      }
-    };
-
-    // --------------------------------------------------------------------------
-    // Lifecycle Management
-    // --------------------------------------------------------------------------
-    onMounted(() => {
-      fetchHealth();
-      fetchSessions();
-      loadWebhookSettings();
-      fetchEvents();
-      initSSE();
-
-      // Setup scheduled intervals
-      pollIntervals.push(setInterval(fetchHealth, 10000));
-      pollIntervals.push(setInterval(fetchSessions, 15000));
-      pollIntervals.push(setInterval(fetchEvents, 4000));
-
-      // Global keyboard handler for modal dismissal
-      window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          closePairingModal();
-          closeWebhookSettingsModal();
-          closeLogoutModal();
-          closePurgeModal();
-        }
+        return result;
       });
-    });
 
-    onBeforeUnmount(() => {
-      stopPairingTimers();
-      if (sseSource) {
-        try { sseSource.close(); } catch {}
-      }
-      pollIntervals.forEach(clearInterval);
-      pollIntervals = [];
-    });
+      // Toggle expanded JSON state without losing state on updates
+      const toggleExpandLog = (itemOrId) => {
+        const id = typeof itemOrId === 'object' && itemOrId !== null ? itemOrId.id : itemOrId;
+        expandedLogIds[id] = !expandedLogIds[id];
+      };
 
-    // Aliases for compatibility
-    const bootSession = initSession;
-    const setTenantPreset = setSessionInput;
-    const switchPairingMode = (mode) => { pairingModal.mode = mode; };
-    const copyPairingCode = () => copyToClipboard(pairingModal.pairingCode, pairingModal);
-    const copyWebhookUrl = () => copyToClipboard(webhookModal.url, webhookModal);
-    const copyEventPayload = (ev) => copyToClipboard(ev.payload || ev.details || ev, ev);
-    const openWebhookSettings = openWebhookSettingsModal;
-    const closeWebhookSettings = closeWebhookSettingsModal;
-    const executeLogout = executeLogoutSession;
-    const executePurge = executePurgeSession;
-    const selectSessionForSend = openTestSend;
-    const sendQuickTest = sendQuickMessage;
-    const sendAdvancedText = sendAdvancedMessage;
-    const sendAdvancedMedia = sendMediaMessage;
-    const clearLogFeed = clearLogs;
-    const clearEventFeed = clearEvents;
+      const copyTelemetryStream = (format = 'text') => {
+        const list = unifiedStream.value;
+        if (!list || list.length === 0) {
+          showToast('No logs to copy', 'warn');
+          return;
+        }
 
-    return {
-      // Navigation
-      activeTab,
-      liveLogTab,
-      consoleTab,
-      streamTab: liveLogTab,
-      sendTab: consoleTab,
+        let content = '';
+        if (format === 'json') {
+          content = JSON.stringify(list, null, 2);
+        } else {
+          content = list
+            .map(
+              (l) =>
+                `[${formatClockTime(l.timestamp)}] [${l.tag}] ${l.sessionId ? `[${l.sessionId}] ` : ''}${l.message}`
+            )
+            .join('\n');
+        }
 
-      // State
-      metrics,
-      sessions,
-      newTenantId,
-      isBooting,
-      pairingModal,
-      webhookModal,
-      quickSend,
-      advancedSend,
-      mediaSend,
-      logoutModal,
-      purgeModal,
-      logs,
-      gatewayEvents,
-      autoScroll,
-      logAutoScroll: autoScroll,
-      eventsAutoScroll,
-      eventAutoScroll: eventsAutoScroll,
-      logLevelFilter,
-      logSessionFilter,
-      logFilterSession: logSessionFilter,
-      logsPaused,
-      isLogsPaused: logsPaused,
-      eventFilter,
-      eventFilterType: eventFilter,
-      eventSessionFilter,
-      eventFilterQuery: eventSessionFilter,
-      eventsPaused,
-      isEventsPaused: eventsPaused,
-      toasts,
+        copyToClipboard(content);
+        showToast(`Copied ${list.length} log lines`, 'info');
+      };
 
-      // Computeds
-      filteredLogs,
-      filteredEvents,
+      const clearTelemetry = () => {
+        logs.value = [];
+        gatewayEvents.value = [];
+        showToast('Terminal buffer cleared', 'info');
+      };
 
-      // Formatters
-      formatDisplayPhone,
-      formatSessionTarget,
-      getRelativeTime,
-      getClockTime,
-      stripAnsi,
+      // --------------------------------------------------------------------------
+      // Utility Helpers
+      // --------------------------------------------------------------------------
+      const copyToClipboard = async (text) => {
+        try {
+          const content = typeof text === 'object' ? JSON.stringify(text, null, 2) : String(text);
+          await navigator.clipboard.writeText(content);
+          showToast('Copied to clipboard', 'info');
+        } catch {
+          showToast('Failed to copy to clipboard', 'error');
+        }
+      };
 
-      // Actions
-      setSessionInput,
-      setTenantPreset,
-      initSession,
-      bootSession,
-      openPairing,
-      closePairingModal,
-      requestPairingCode,
-      switchPairingMode,
-      startQrPolling,
-      openLogoutModal,
-      closeLogoutModal,
-      executeLogoutSession,
-      executeLogout,
-      openPurgeModal,
-      closePurgeModal,
-      executePurgeSession,
-      executePurge,
-      openTestSend,
-      selectSessionForSend,
-      sendQuickMessage,
-      sendQuickTest,
-      sendAdvancedMessage,
-      sendAdvancedText,
-      sendMediaMessage,
-      sendAdvancedMedia,
-      openWebhookSettingsModal,
-      openWebhookSettings,
-      closeWebhookSettingsModal,
-      closeWebhookSettings,
-      saveWebhookSettings,
-      testWebhookPing,
-      copyToClipboard,
-      copyPairingCode,
-      copyWebhookUrl,
-      copyEventPayload,
-      copyAllLogs,
-      copyAllEvents,
-      clearLogs,
-      clearLogFeed,
-      clearEvents,
-      clearEventFeed,
-      manualRefreshAll,
-    };
-  }
-});
+      const manualRefreshAll = async () => {
+        metrics.isRefreshing = true;
+        try {
+          await Promise.all([
+            fetchHealth(),
+            fetchSessions(),
+            fetchWebhookSettings(),
+            fetchGatewayEvents(),
+          ]);
+          showToast('Telemetry and sessions synchronized', 'info');
+        } finally {
+          setTimeout(() => {
+            metrics.isRefreshing = false;
+          }, 350);
+        }
+      };
 
-function mountVueDashboard() {
-  if (document.getElementById('app')) {
-    app.mount('#app');
-  } else {
-    document.addEventListener('DOMContentLoaded', () => {
+      // --------------------------------------------------------------------------
+      // Lifecycle Hooks
+      // --------------------------------------------------------------------------
+      onMounted(() => {
+        fetchHealth();
+        fetchSessions();
+        fetchWebhookSettings();
+        fetchGatewayEvents();
+        initSSE();
+
+        pollIntervals.push(setInterval(fetchHealth, 8000));
+        pollIntervals.push(setInterval(fetchSessions, 12000));
+        pollIntervals.push(setInterval(fetchGatewayEvents, 5000));
+
+        window.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            cancelConfirmAction();
+          }
+        });
+      });
+
+      onBeforeUnmount(() => {
+        Object.keys(inlinePairing).forEach((sid) => stopSessionQrPoll(sid));
+        if (sseSource) {
+          try {
+            sseSource.close();
+          } catch {}
+        }
+        pollIntervals.forEach(clearInterval);
+        pollIntervals = [];
+      });
+
+      return {
+        // Navigation
+        activeTab,
+
+        // Header & Telemetry
+        metrics,
+        manualRefreshAll,
+        fetchSessions,
+        getLevelBadgeClass,
+
+        // Sessions View
+        sessions,
+        newTenantId,
+        isBooting,
+        bootSession,
+        inlinePairing,
+        toggleInlinePairing,
+        setPairingMode,
+        setAuthTab,
+        requestPairingCode,
+        copyPairingCode,
+        startSessionQrPoll,
+        confirmAction,
+        promptConfirmAction,
+        cancelConfirmAction,
+        executeConfirmAction,
+        jumpToApiConsole,
+
+        // API Console View
+        apiConsole,
+        dispatchApiRequest,
+        copyApiResponse,
+
+        // Telemetry View
+        unifiedStream,
+        telemetryFilter,
+        telemetrySearch,
+        autoScroll,
+        isPaused,
+        expandedLogIds,
+        toggleExpandLog,
+        copyTelemetryStream,
+        clearTelemetry,
+
+        // Helpers
+        toasts,
+        formatDisplayPhone,
+        getUserPushName,
+        formatClockTime,
+        copyToClipboard,
+      };
+    },
+  });
+
+  function mountVueDashboard() {
+    if (document.getElementById('app')) {
       app.mount('#app');
-    });
+    } else {
+      document.addEventListener('DOMContentLoaded', () => {
+        app.mount('#app');
+      });
+    }
   }
-}
 
-mountVueDashboard();
+  mountVueDashboard();
 })();
