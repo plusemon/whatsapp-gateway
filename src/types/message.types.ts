@@ -27,7 +27,7 @@ export interface MediaDetectedInfo {
 }
 
 /**
- * Payload dispatched to the Botla Laravel webhook on inbound messages.
+ * Payload dispatched to the webhook on inbound messages.
  */
 export interface WebhookInboundPayload {
   sessionId: string;
@@ -41,7 +41,7 @@ export interface WebhookInboundPayload {
 }
 
 /**
- * Payload dispatched to the Botla Laravel webhook on message status ACK updates.
+ * Payload dispatched to the webhook on message status ACK updates.
  */
 export interface WebhookAckPayload {
   sessionId: string;
@@ -68,7 +68,7 @@ export interface OutboundMessageResult {
 }
 
 /**
- * Standardized Botla REST API v1 Send Text Request Body
+ * Standardized REST API v1 Send Text Request Body
  */
 export interface SendTextV1Body {
   sessionId: string;
@@ -81,7 +81,7 @@ export interface SendTextV1Body {
 }
 
 /**
- * Standardized Botla REST API v1 Send Media Request Body
+ * Standardized REST API v1 Send Media Request Body
  */
 export interface SendMediaV1Body {
   sessionId: string;
@@ -99,7 +99,7 @@ export interface SendMediaV1Body {
 }
 
 /**
- * Standardized Botla Inbound Webhook Event Payload
+ * Standardized Inbound Webhook Event Payload
  */
 export interface StandardWebhookPayload<T = any> {
   event: 'message.inbound' | 'message.ack' | 'session.status' | string;

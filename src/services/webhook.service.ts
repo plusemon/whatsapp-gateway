@@ -1,6 +1,6 @@
 /**
  * Inbound Webhook Relay Service
- * Signs and dispatches WhatsApp event payloads to the Botla Core Laravel application.
+ * Signs and dispatches WhatsApp event payloads to downstream webhook consumers.
  * Supports dynamic global & tenant-level overrides, event filtering, and exponential backoff retries.
  */
 import crypto from 'crypto';
@@ -65,7 +65,7 @@ export class WebhookService {
       if (raw) {
         const parsed = JSON.parse(raw);
         return {
-          url: parsed.url ?? config.botlaWebhookUrl,
+          url: parsed.url ?? config.webhookUrl,
           secret: parsed.secret ?? config.webhookSecret,
           token: parsed.token ?? config.webhookToken,
           enabled: parsed.enabled ?? false,
@@ -90,7 +90,7 @@ export class WebhookService {
     }
 
     return {
-      url: config.botlaWebhookUrl,
+      url: config.webhookUrl,
       secret: config.webhookSecret,
       token: config.webhookToken,
       enabled: false,
@@ -99,6 +99,7 @@ export class WebhookService {
       source: 'env',
     };
   }
+
 
   /**
    * Get session-specific webhook override.
@@ -290,7 +291,7 @@ export class WebhookService {
     const bodyString = JSON.stringify(payload);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': 'Botla-WhatsApp-Gateway/1.2',
+      'User-Agent': 'WhatsApp-Gateway/1.2',
     };
 
     if (active.token) {
@@ -299,8 +300,10 @@ export class WebhookService {
 
     if (active.secret) {
       const signature = WebhookService.generateSignature(bodyString, active.secret);
-      headers['X-Botla-Signature'] = `sha256=${signature}`;
+      headers['X-Gateway-Signature-256'] = `sha256=${signature}`;
       headers['X-Hub-Signature-256'] = `sha256=${signature}`;
+      headers['X-Gateway-Signature-Raw'] = signature;
+      headers['X-Botla-Signature'] = `sha256=${signature}`;
       headers['X-Botla-Signature-Raw'] = signature;
     }
 
@@ -396,13 +399,13 @@ export class WebhookService {
     const testPayload = {
       event: 'webhook_ping',
       timestamp: new Date().toISOString(),
-      gateway: 'Botla-WhatsApp-Gateway',
+      gateway: 'WhatsApp-Gateway',
       sessionId: sessionId || 'global-ping',
     };
     const bodyString = JSON.stringify(testPayload);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': 'Botla-WhatsApp-Gateway-Ping/1.2',
+      'User-Agent': 'WhatsApp-Gateway-Ping/1.2',
     };
 
     if (bearerToken) {
@@ -411,8 +414,10 @@ export class WebhookService {
 
     if (hmacSecret) {
       const signature = WebhookService.generateSignature(bodyString, hmacSecret);
-      headers['X-Botla-Signature'] = `sha256=${signature}`;
+      headers['X-Gateway-Signature-256'] = `sha256=${signature}`;
       headers['X-Hub-Signature-256'] = `sha256=${signature}`;
+      headers['X-Gateway-Signature-Raw'] = signature;
+      headers['X-Botla-Signature'] = `sha256=${signature}`;
       headers['X-Botla-Signature-Raw'] = signature;
     }
 

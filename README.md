@@ -1,4 +1,4 @@
-# Botla WhatsApp Gateway
+# WhatsApp Gateway Microservice
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tandpfun/skill-icons/main/icons/TypeScript.svg" width="45" height="45" alt="TypeScript" />
@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <strong>High-performance, decoupled, multi-tenant WhatsApp Web microservice engineered for enterprise SaaS and AI orchestration platforms.</strong>
+  <strong>High-performance, decoupled, multi-tenant WhatsApp Web microservice engineered for enterprise SaaS, CRM, and AI orchestration backends.</strong>
 </p>
 
 <p align="center">
@@ -28,13 +28,13 @@
 
 ## 1. Overview & Value Proposition
 
-**Botla WhatsApp Gateway** is an enterprise-grade WhatsApp Web communication microservice built on top of Node.js 20+, TypeScript, Fastify, and [`@whiskeysockets/baileys`](https://github.com/WhiskeySockets/Baileys). Designed specifically as the real-time telephony edge for the **Botla AI Platform** (Laravel core), it bridges multi-tenant WhatsApp interactions directly to downstream AI conversational pipelines.
+**WhatsApp Gateway Microservice** is an enterprise-grade WhatsApp Web communication microservice built on top of Node.js 20+, TypeScript, Fastify, and [`@whiskeysockets/baileys`](https://github.com/WhiskeySockets/Baileys). It acts as a real-time messaging gateway that bridges multi-tenant WhatsApp interactions directly to downstream AI conversational pipelines, webhooks, and backend systems.
 
-### Why Botla WhatsApp Gateway?
+### Key Capabilities
 * **Zero Chromium Overhead:** Operates entirely over native binary WebSockets using WhatsApp's Noise Protocol. Zero Puppeteer, zero Playwright, and zero headless browser memory bloat (~35MB RAM footprint vs ~600MB+ per browser session).
-* **Multi-Tenant State Segregation:** Isolate dozens or hundreds of tenant WhatsApp numbers within a single daemon. Each tenant maintains isolated cryptographic keys persisted in Redis under the `wa:session:${sessionId}:*` namespace.
-* **Anti-Ban Guardrails:** Built-in human emulation layer triggers WhatsApp typing indicators (`composing`), randomizes execution jitter (600ms–1400ms), and toggles `paused` state before every message dispatch.
-* **Carrier-Grade Ingress & Egress:** Inbound messages (text, ephemeral messages, buttons, interactive lists, polls, voice notes, images, PDFs) are normalized, buffered to local media storage, and dispatched to Laravel via asynchronous HTTP POST signed with HMAC-SHA256.
+* **Multi-Tenant State Segregation:** Isolate multiple tenant WhatsApp numbers within a single daemon. Each tenant maintains isolated cryptographic keys persisted in Redis under the `wa:session:${sessionId}:*` namespace (configurable via `REDIS_PREFIX`).
+* **Anti-Ban Guardrails:** Built-in human emulation layer triggers WhatsApp typing indicators (`composing`), randomizes execution jitter (600ms–1400ms), and toggles `paused` state before message dispatch.
+* **Carrier-Grade Ingress & Egress:** Inbound messages (text, ephemeral messages, buttons, interactive lists, polls, voice notes, images, PDFs) are normalized, buffered to local media storage, and dispatched to downstream webhooks via asynchronous HTTP POST signed with HMAC-SHA256 (`X-Gateway-Signature-256` / `X-Hub-Signature-256`).
 
 ---
 
@@ -42,7 +42,7 @@
 
 ```text
  ┌────────────────┐              ┌────────────────────────────────────────────────────────┐
- │                │              │              BOTLA WHATSAPP GATEWAY                    │
+ │                │              │              WHATSAPP GATEWAY MICROSERVICE             │
  │  WhatsApp Web  │  TLS/Noise   │                                                        │
  │    Servers     │◄────────────►│  ┌──────────────────────────────────────────────────┐  │
  │                │   WebSocket  │  │        Baileys Multi-Tenant Socket Pool          │  │
@@ -68,11 +68,11 @@
                                  └──────────┼──────────────────────────┼──────────────────┘
                                             │                          │
                  REST Command Calls         │                          │ Signed Webhooks
-         (Init, Send, Media, Delete)        │                          │ (X-Botla-Signature)
+         (Init, Send, Media, Delete)        │                          │ (X-Gateway-Signature-256)
                                             ▼                          ▼
                                  ┌─────────────────────────────────────────────┐
-                                 │         BOTLA CORE (Laravel Backend)        │
-                                 │     AI Orchestration & LLM Agents           │
+                                 │         DOWNSTREAM APP / BACKEND            │
+                                 │       Webhook Receivers & AI Agents         │
                                  └──────────────────────┬──────────────────────┘
                                                         │
                                                         ▼
@@ -101,7 +101,7 @@
 
 ### 💾 Redis Auth Persistence & Resilience
 * **Custom `useRedisAuthState`:** High-performance adapter storing credentials, pre-keys, sender keys, and app sync state in Redis using `BufferJSON` serialization.
-* **Key Hierarchy:** `wa:session:${sessionId}:creds` and `wa:session:${sessionId}:${category}:${id}`.
+* **Key Hierarchy:** `${REDIS_PREFIX}${sessionId}:creds` and `${REDIS_PREFIX}${sessionId}:${category}:${id}` (default prefix `wa:session:`).
 * **Auto-Reconnection on Boot:** Scans `wa:session:*:creds` on server startup and restores all active sockets in the background without blocking HTTP traffic.
 * **Development Fallback:** Seamless in-memory `ioredis-mock` adapter engages automatically if no Redis server is available.
 
@@ -111,10 +111,10 @@
 * Outbound media handler supports remote URLs as well as binary fallback uploads.
 
 ### 🔒 Cryptographic Webhooks
-* Inbound WhatsApp messages are posted asynchronously to Botla Core.
-* Every HTTP POST contains `X-Botla-Signature` (hex HMAC-SHA256) and `X-Hub-Signature-256` (`sha256=<hex>`) computed using `WEBHOOK_SECRET`.
+* Inbound WhatsApp messages are posted asynchronously to your configured webhook URL.
+* Every HTTP POST contains `X-Gateway-Signature-256` (hex HMAC-SHA256) and `X-Hub-Signature-256` (`sha256=<hex>`) computed using `WEBHOOK_SECRET`.
 
-### 📱 Responsive Industrial Dark Console
+### 📱 Developer Diagnostic Console
 * Bundled single-page dashboard styled with Tailwind CSS.
 * Real-time tenant switcher, QR code modal, pairing code generator, message sender, and live streaming event monitor.
 
@@ -132,12 +132,16 @@
 │   ├── manager/
 │   │   └── sessionManager.ts    # Multi-tenant WASocket pool, anti-ban jitter, webhook dispatcher
 │   ├── routes/
-│   │   └── sessionRoutes.ts     # Fastify REST endpoints (/init, /qr, /pair-code, /send, /purge)
+│   │   ├── api.routes.ts        # REST API endpoints (/sessions, /messages, /system, etc.)
+│   │   ├── sessionRoutes.ts     # Session endpoints (/init, /qr, /pair-code, /send, /purge)
+│   │   └── ui.routes.ts         # Dashboard UI server
 │   ├── types/
 │   │   └── index.ts             # TypeScript types, payloads, and response interfaces
 │   ├── views/
-│   │   └── dashboard.html       # Industrial dark-mode operations console (Tailwind CSS)
-│   ├── config.ts                # Environment parsing, logger setup, Redis connection & mock fallback
+│   │   └── dashboard.html       # Diagnostic operations console (Tailwind CSS)
+│   ├── config/
+│   │   ├── env.ts               # Environment schema and config parser
+│   │   └── redis.ts             # Redis client and mock connection
 │   └── server.ts                # Fastify bootstrap, static file serving, and graceful shutdown
 ├── .env.example                 # Environment configuration template
 ├── package.json                 # Project manifest & dependencies
@@ -158,8 +162,8 @@
 
 1. **Clone the Repository:**
    ```bash
-   git clone https://github.com/your-org/botla-whatsapp-gateway.git
-   cd botla-whatsapp-gateway
+   git clone https://github.com/your-org/whatsapp-gateway.git
+   cd whatsapp-gateway
    ```
 
 2. **Install Dependencies:**
@@ -190,16 +194,18 @@
 
 ## 6. Environment Variables
 
-All configuration is parsed in `src/config.ts` with strict fallbacks:
+All configuration is parsed in `src/config/env.ts` with strict validation:
 
 | Variable | Type | Default | Description |
 | :--- | :---: | :--- | :--- |
 | `PORT` | `number` | `3000` | Port for the Fastify HTTP gateway server. |
 | `HOST` | `string` | `0.0.0.0` | Network binding host address (`0.0.0.0` for Docker/K8s). |
 | `PUBLIC_URL` | `string` | `http://127.0.0.1:3000` | Canonical external URL used when constructing media download links. |
+| `GATEWAY_API_KEY` | `string` | `gateway-secret-token` | Master API Key for authenticated REST API calls (`X-API-Key` or Bearer token). |
 | `REDIS_URL` | `string` | `redis://127.0.0.1:6379` | Connection URI for the Redis persistence cluster. |
+| `REDIS_PREFIX` | `string` | `wa:session:` | Key prefix for session storage in Redis. |
 | `USE_MOCK_REDIS` | `boolean` | `false` | When set to `true`, forces in-memory Redis mock (useful for sandboxes/CI). |
-| `BOTLA_WEBHOOK_URL` | `string` | `http://127.0.0.1:8000/api/whatsapp/webhook` | Downstream Laravel endpoint for inbound message forwarding. |
+| `WEBHOOK_URL` | `string` | `http://127.0.0.1:8000/api/whatsapp/webhook` | Downstream endpoint for inbound message forwarding. |
 | `WEBHOOK_SECRET` | `string` | `your_hmac_secret_here` | Shared secret used to sign inbound webhook dispatches with HMAC-SHA256. |
 | `LOG_LEVEL` | `string` | `info` | Pino logging level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`). |
 
@@ -221,7 +227,7 @@ curl -X GET http://localhost:3000/api/health
 ```json
 {
   "status": "ok",
-  "service": "botla-whatsapp-gateway",
+  "service": "whatsapp-gateway",
   "version": "1.0.0",
   "uptimeSeconds": 3412,
   "timestamp": "2026-09-18T16:20:00.000Z",
@@ -240,7 +246,8 @@ curl -X GET http://localhost:3000/api/health
 Initializes a new or restores an existing WhatsApp socket for the given tenant `:id`.
 
 ```bash
-curl -X POST http://localhost:3000/api/sessions/tenant-001/init
+curl -X POST http://localhost:3000/api/sessions/tenant-001/init \
+  -H "X-API-Key: gateway-secret-token"
 ```
 
 **Response (`200 OK`):**
@@ -260,7 +267,8 @@ curl -X POST http://localhost:3000/api/sessions/tenant-001/init
 Retrieves the raw QR code string and rendered base64 PNG data URL for scanning.
 
 ```bash
-curl -X GET http://localhost:3000/api/sessions/tenant-001/qr
+curl -X GET http://localhost:3000/api/sessions/tenant-001/qr \
+  -H "X-API-Key: gateway-secret-token"
 ```
 
 **Response (`200 OK`):**
@@ -282,6 +290,7 @@ Generates an 8-character pairing code for linking a WhatsApp device via telephon
 ```bash
 curl -X POST http://localhost:3000/api/sessions/tenant-001/pair-code \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: gateway-secret-token" \
   -d '{
     "phoneNumber": "8801712345678"
   }'
@@ -303,7 +312,8 @@ curl -X POST http://localhost:3000/api/sessions/tenant-001/pair-code \
 Terminates the active socket, removes it from memory, and completely purges all associated keys (`wa:session:tenant-001:*`) from Redis.
 
 ```bash
-curl -X DELETE http://localhost:3000/api/sessions/tenant-001
+curl -X DELETE http://localhost:3000/api/sessions/tenant-001 \
+  -H "X-API-Key: gateway-secret-token"
 ```
 
 **Response (`200 OK`):**
@@ -325,9 +335,10 @@ Dispatches an outbound text message with anti-ban human presence simulation.
 ```bash
 curl -X POST http://localhost:3000/api/sessions/tenant-001/send \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: gateway-secret-token" \
   -d '{
     "jid": "1234567890@s.whatsapp.net",
-    "text": "Hello from Botla WhatsApp Gateway! How can we assist you today?"
+    "text": "Hello from WhatsApp Gateway! How can we assist you today?"
   }'
 ```
 
@@ -350,6 +361,7 @@ Dispatches images, documents, audio clips, or voice notes (`ptt`).
 ```bash
 curl -X POST http://localhost:3000/api/sessions/tenant-001/send-media \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: gateway-secret-token" \
   -d '{
     "jid": "1234567890@s.whatsapp.net",
     "type": "image",
@@ -374,7 +386,7 @@ curl -X POST http://localhost:3000/api/sessions/tenant-001/send-media \
 
 ## 8. Webhook Specification & HMAC Verification
 
-When an inbound message is received, the gateway compiles a standardized payload and sends an asynchronous HTTP POST request to `BOTLA_WEBHOOK_URL`.
+When an inbound message is received, the gateway compiles a standardized payload and sends an asynchronous HTTP POST request to `WEBHOOK_URL`.
 
 ### Inbound Payload Schema
 
@@ -406,14 +418,47 @@ When an inbound message is received, the gateway compiles a standardized payload
 ```
 
 ### Signature Headers Sent
-* `X-Botla-Signature`: Raw hex-encoded HMAC-SHA256 digest of the request body.
-* `X-Hub-Signature-256`: `sha256=<hex_digest>` (standard GitHub/Meta webhook convention).
+* `X-Gateway-Signature-256`: Raw hex-encoded HMAC-SHA256 digest of the request body.
+* `X-Hub-Signature-256`: `sha256=<hex_digest>` (standard webhook convention).
 
 ---
 
 ### Verification Code Samples
 
-#### Laravel / PHP (Botla Core Middleware)
+#### Node.js / Express Receiver
+
+```typescript
+import crypto from 'crypto';
+import express from 'express';
+
+const app = express();
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'your_hmac_secret_here';
+
+app.post(
+  '/api/whatsapp/webhook',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    const signature = req.headers['x-gateway-signature-256'] as string;
+    const rawBody = req.body.toString('utf-8');
+
+    const expected = crypto
+      .createHmac('sha256', WEBHOOK_SECRET)
+      .update(rawBody)
+      .digest('hex');
+
+    if (!crypto.timingSafeEqual(Buffer.from(signature || '', 'hex'), Buffer.from(expected, 'hex'))) {
+      return res.status(401).json({ error: 'Signature mismatch' });
+    }
+
+    const payload = JSON.parse(rawBody);
+    console.log(`[Gateway] Inbound message from tenant: ${payload.sessionId}`);
+    
+    return res.status(200).json({ success: true });
+  }
+);
+```
+
+#### PHP Receiver
 
 ```php
 <?php
@@ -424,11 +469,11 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\UnauthorizedHttpException;
 
-class VerifyBotlaWhatsAppSignature
+class VerifyWhatsAppGatewaySignature
 {
     public function handle(Request $request, Closure $next)
     {
-        $signature = $request->header('X-Botla-Signature');
+        $signature = $request->header('X-Gateway-Signature-256');
         $secret = config('services.whatsapp_gateway.secret');
 
         if (!$signature || !$secret) {
@@ -444,39 +489,6 @@ class VerifyBotlaWhatsAppSignature
         return $next($request);
     }
 }
-```
-
-#### Node.js / Express Receiver
-
-```typescript
-import crypto from 'crypto';
-import express from 'express';
-
-const app = express();
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'your_hmac_secret_here';
-
-app.post(
-  '/api/whatsapp/webhook',
-  express.raw({ type: 'application/json' }),
-  (req, res) => {
-    const signature = req.headers['x-botla-signature'] as string;
-    const rawBody = req.body.toString('utf-8');
-
-    const expected = crypto
-      .createHmac('sha256', WEBHOOK_SECRET)
-      .update(rawBody)
-      .digest('hex');
-
-    if (!crypto.timingSafeEqual(Buffer.from(signature || '', 'hex'), Buffer.from(expected, 'hex'))) {
-      return res.status(401).json({ error: 'Signature mismatch' });
-    }
-
-    const payload = JSON.parse(rawBody);
-    console.log(`[Botla] Inbound message from tenant: ${payload.sessionId}`);
-    
-    return res.status(200).json({ success: true });
-  }
-);
 ```
 
 ---
@@ -496,7 +508,7 @@ app.post(
 module.exports = {
   apps: [
     {
-      name: 'botla-whatsapp-gateway',
+      name: 'whatsapp-gateway',
       script: './dist/server.cjs',
       instances: 1,              // MUST BE 1 to avoid socket collisions
       exec_mode: 'fork',         // Single fork mode
@@ -580,4 +592,4 @@ CMD ["node", "dist/server.cjs"]
 ## 12. License
 
 This project is licensed under the [MIT License](LICENSE).
-Copyright (c) 2026 Botla AI Platform. All rights reserved.
+Copyright (c) 2026 WhatsApp Gateway Contributors. All rights reserved.

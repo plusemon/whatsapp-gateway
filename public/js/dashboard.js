@@ -1,5 +1,5 @@
 /**
- * Botla WhatsApp Gateway - Developer Diagnostic Dashboard
+ * WhatsApp Gateway - Developer Diagnostic Dashboard
  * High-Density Dark-Mode Console (Postman-Lite + Live Terminal)
  * Zero-Build Vue 3 CDN (Composition API) Architecture
  */
@@ -7,9 +7,10 @@
 (function () {
   'use strict';
 
-  if (window.__BOTLA_DASHBOARD_INITIALIZED__) {
+  if (window.__GATEWAY_DASHBOARD_INITIALIZED__) {
     return;
   }
+  window.__GATEWAY_DASHBOARD_INITIALIZED__ = true;
   window.__BOTLA_DASHBOARD_INITIALIZED__ = true;
 
   const { createApp, ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } = Vue;
@@ -38,7 +39,7 @@
       // 3. Sessions State & Inline Pairing
       // --------------------------------------------------------------------------
       const sessions = ref([]);
-      const newTenantId = ref('tenant-botla-1');
+      const newTenantId = ref('tenant-1');
       const isBooting = ref(false);
 
       // Inline pairing state per session (prevents disorienting modals)
@@ -59,12 +60,12 @@
         action: 'text', // 'text' | 'media' | 'webhook'
         sessionId: '',
         destination: '6281234567890@s.whatsapp.net',
-        text: 'Hello from Botla WhatsApp Gateway! 🚀',
+        text: 'Hello from WhatsApp Gateway! 🚀',
         presence: true, // anti-ban presence simulation (composing + randomized jitter)
         mediaType: 'image', // 'image' | 'document' | 'audio' | 'video'
         mediaUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600',
         caption: 'Diagnostic test asset attachment.',
-        filename: 'botla-test-document.pdf',
+        filename: 'gateway-test-document.pdf',
         ptt: false,
         webhookUrl: 'http://localhost:8000/api/whatsapp/webhook',
         webhookSecret: '',
@@ -108,8 +109,11 @@
       const getAuthHeaders = () => {
         const apiKey =
           (typeof window !== 'undefined' &&
-            (localStorage.getItem('botla_api_key') || window.__BOTLA_API_KEY__)) ||
-          'botla-gateway-api-key';
+            (localStorage.getItem('gateway_api_key') ||
+              localStorage.getItem('botla_api_key') ||
+              window.__GATEWAY_API_KEY__ ||
+              window.__BOTLA_API_KEY__)) ||
+          'gateway-api-key';
         return {
           'Content-Type': 'application/json',
           'x-api-key': apiKey,

@@ -29,11 +29,11 @@ export function getDashboardHtml(): string {
       try {
         let content = fs.readFileSync(p, 'utf-8');
         const activeKey =
+          process.env.GATEWAY_API_KEY ||
           process.env.API_GATEWAY_KEY ||
           process.env.API_KEY ||
-          process.env.GATEWAY_API_KEY ||
-          'botla-gateway-api-key';
-        const injection = `<script>window.__BOTLA_API_KEY__ = ${JSON.stringify(activeKey)};</script>`;
+          'gateway-api-key';
+        const injection = `<script>window.__GATEWAY_API_KEY__ = ${JSON.stringify(activeKey)}; window.__BOTLA_API_KEY__ = ${JSON.stringify(activeKey)};</script>`;
         if (content.includes('</head>')) {
           content = content.replace('</head>', `${injection}\n</head>`);
         } else if (content.includes('<body>')) {
@@ -48,10 +48,10 @@ export function getDashboardHtml(): string {
 
   return `<!DOCTYPE html>
 <html>
-<head><title>Botla WhatsApp Gateway</title></head>
+<head><title>WhatsApp Gateway</title></head>
 <body style="font-family:sans-serif;padding:2rem;background:#0f172a;color:#fff;">
-  <h1>Botla WhatsApp Gateway</h1>
-  <p>Gateway service is running. Dashboard view file not located.</p>
+  <h1>WhatsApp Gateway</h1>
+  <p>Gateway microservice is running. Dashboard view file not located.</p>
 </body>
 </html>`;
 }

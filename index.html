@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Botla WhatsApp Gateway - Diagnostic Console</title>
-  <meta name="description" content="Developer diagnostic dashboard, Postman-lite test runner, and live terminal telemetry for Botla WhatsApp Gateway.">
+  <title>WhatsApp Gateway - Diagnostic Console</title>
+  <meta name="description" content="Developer diagnostic dashboard, Postman-lite test runner, and live terminal telemetry for WhatsApp Gateway.">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -42,7 +42,7 @@
           <span class="text-emerald-400 text-sm">💬</span>
         </div>
         <div class="flex items-center gap-1.5 truncate">
-          <h1 class="text-sm font-semibold text-slate-100 truncate">Botla</h1>
+          <h1 class="text-sm font-semibold text-slate-100 truncate">WhatsApp Gateway</h1>
           <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">v1.2</span>
         </div>
       </div>
@@ -105,14 +105,14 @@
                 v-model="newTenantId"
                 @keydown.enter="bootSession"
                 type="text"
-                placeholder="tenant-id (e.g. tenant-botla-1)"
+                placeholder="tenant-id (e.g. tenant-1)"
                 class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-500 font-mono focus:border-emerald-500 focus:outline-none"
               />
             </div>
             <!-- Preset Pills -->
             <div class="hidden md:flex items-center gap-1.5 text-[11px] font-mono text-zinc-400">
               <span>Presets:</span>
-              <button @click="newTenantId = 'tenant-botla-1'" class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 hover:text-white transition">botla-1</button>
+              <button @click="newTenantId = 'tenant-1'" class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 hover:text-white transition">tenant-1</button>
               <button @click="newTenantId = 'tenant-sales'" class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 hover:text-white transition">sales</button>
               <button @click="newTenantId = 'tenant-support'" class="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 hover:text-white transition">support</button>
             </div>
@@ -236,28 +236,43 @@
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-1 bg-zinc-950 p-0.5 rounded border border-zinc-800 text-[10px] font-medium">
                   <button
-                    @click="setPairingMode(session.id, 'phone')"
-                    :class="inlinePairing[session.id].mode === 'phone' ? 'bg-emerald-500 text-zinc-950 font-bold' : 'text-zinc-400 hover:text-zinc-200'"
-                    class="px-2 py-0.5 rounded transition"
-                  >
-                    Phone Code
-                  </button>
-                  <button
-                    @click="setPairingMode(session.id, 'qr')"
-                    :class="inlinePairing[session.id].mode === 'qr' ? 'bg-zinc-800 text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'"
-                    class="px-2 py-0.5 rounded transition"
+                    @click="setAuthTab(session.id, 'qr')"
+                    :class="(inlinePairing[session.id].authTab === 'qr' || inlinePairing[session.id].mode === 'qr') ? 'bg-emerald-500 text-zinc-950 font-bold' : 'text-zinc-400 hover:text-zinc-200'"
+                    class="px-2.5 py-1 rounded transition cursor-pointer"
                   >
                     QR Code
                   </button>
+                  <button
+                    @click="setAuthTab(session.id, 'pair_code')"
+                    :class="(inlinePairing[session.id].authTab === 'pair_code' || inlinePairing[session.id].mode === 'phone') ? 'bg-emerald-500 text-zinc-950 font-bold' : 'text-zinc-400 hover:text-zinc-200'"
+                    class="px-2.5 py-1 rounded transition cursor-pointer"
+                  >
+                    Phone Code
+                  </button>
                 </div>
 
-                <button @click="toggleInlinePairing(session.id, false)" class="text-zinc-500 hover:text-zinc-300 text-xs p-1" title="Close Pairing">
+                <button @click="toggleInlinePairing(session.id, false)" class="text-zinc-500 hover:text-zinc-300 text-xs p-1 cursor-pointer" title="Close Pairing">
                   ✕
                 </button>
               </div>
 
-              <!-- PHONE PAIRING CODE MODE (Zero Chromium Rule) -->
-              <div v-if="inlinePairing[session.id].mode === 'phone'" class="space-y-2.5">
+              <!-- 1. QR CODE VIEW (Natural Default) -->
+              <div v-if="inlinePairing[session.id].authTab === 'qr' || inlinePairing[session.id].mode === 'qr'" class="space-y-2 text-center">
+                <div v-if="inlinePairing[session.id].qrImage" class="p-2 bg-white rounded-lg inline-block mx-auto shadow-md">
+                  <img :src="inlinePairing[session.id].qrImage" alt="WhatsApp QR Code" class="w-44 h-44 object-contain mx-auto" />
+                </div>
+                <div v-else class="w-44 h-44 rounded-lg bg-zinc-950 border border-zinc-800 flex flex-col items-center justify-center mx-auto text-xs text-zinc-500 gap-2">
+                  <svg class="w-6 h-6 animate-spin text-emerald-400" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                  </svg>
+                  <span class="animate-pulse text-zinc-400 font-mono text-[11px]">Generating QR...</span>
+                </div>
+                <p class="text-[10px] text-zinc-400">Scan via WhatsApp &gt; Linked Devices</p>
+              </div>
+
+              <!-- 2. PHONE PAIRING CODE VIEW (On-Demand) -->
+              <div v-else class="space-y-2.5">
                 <p class="text-[11px] text-zinc-400 leading-tight">
                   Enter mobile number with country code (e.g. <span class="font-mono text-zinc-300">8801995329555</span>) to request desktop pairing code:
                 </p>
@@ -288,7 +303,7 @@
                     </span>
                     <button
                       @click="copyPairingCode(session.id)"
-                      class="px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 font-medium text-[10px] flex items-center gap-1 transition active:scale-95"
+                      class="px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 font-medium text-[10px] flex items-center gap-1 transition active:scale-95 cursor-pointer"
                     >
                       <span>{{ inlinePairing[session.id].copied ? '✓ Copied!' : '📋 Copy' }}</span>
                     </button>
@@ -312,17 +327,6 @@
                 <p v-if="inlinePairing[session.id].statusText" class="text-[10px] text-zinc-400 font-mono">
                   {{ inlinePairing[session.id].statusText }}
                 </p>
-              </div>
-
-              <!-- QR CODE MODE (Fallback) -->
-              <div v-else class="space-y-2 text-center">
-                <div v-if="inlinePairing[session.id].qrImage" class="p-2 bg-white rounded-lg inline-block mx-auto">
-                  <img :src="inlinePairing[session.id].qrImage" alt="WhatsApp QR Code" class="w-40 h-40 object-contain mx-auto" />
-                </div>
-                <div v-else class="w-40 h-40 rounded-lg bg-zinc-950 border border-zinc-800 flex items-center justify-center mx-auto text-xs text-zinc-500">
-                  <span class="animate-pulse">Generating QR...</span>
-                </div>
-                <p class="text-[10px] text-zinc-400">Scan via WhatsApp &gt; Linked Devices</p>
               </div>
 
             </div>
@@ -549,7 +553,7 @@
             <!-- ===================== ACTION: WEBHOOK PING ===================== -->
             <div v-if="apiConsole.action === 'webhook'" class="space-y-3">
               <div class="space-y-1.5">
-                <label class="text-xs text-zinc-400 font-medium">Botla Core / Laravel Webhook URL</label>
+                <label class="text-xs text-zinc-400 font-medium">Downstream Webhook URL</label>
                 <input
                   v-model="apiConsole.webhookUrl"
                   type="url"
@@ -564,7 +568,7 @@
                   <input
                     v-model="apiConsole.webhookSecret"
                     type="password"
-                    placeholder="X-Botla-Signature Secret"
+                    placeholder="X-Gateway-Signature-256 Secret"
                     class="w-full bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-2 text-xs text-white font-mono focus:border-indigo-500 focus:outline-none"
                   />
                 </div>

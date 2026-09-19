@@ -1,4 +1,5 @@
 /**
- * Botla WhatsApp Gateway Entrypoint
+ * WhatsApp Gateway Entrypoint
  */
 import './src/server.js';
+

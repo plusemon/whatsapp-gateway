@@ -1,5 +1,5 @@
 /**
- * Centralized Type Exports for Botla WhatsApp Gateway
+ * Centralized Type Exports for WhatsApp Gateway Microservice
  */
 export * from './session.types.js';
 export * from './message.types.js';

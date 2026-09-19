@@ -1,5 +1,5 @@
 /**
- * Botla WhatsApp Gateway - Application Entrypoint
+ * WhatsApp Gateway - Application Entrypoint
  * Bootstraps Fastify server, middleware pipelines, API/UI routes,
  * background persistence workers, and graceful lifecycle handlers.
  */
@@ -91,11 +91,11 @@ export async function startServer() {
         port: config.port,
         host: config.host,
         publicUrl: getPublicBaseUrl(),
-        webhookTarget: config.botlaWebhookUrl,
+        webhookTarget: config.webhookUrl,
         redisTarget: config.redisUrl,
         mediaRetentionHours: config.mediaRetentionHours,
       },
-      `⚡ Botla WhatsApp Gateway listening on ${address}`
+      `⚡ WhatsApp Gateway listening on ${address}`
     );
 
     // Start background automated media storage cleanup worker

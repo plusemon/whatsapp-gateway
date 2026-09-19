@@ -25,13 +25,13 @@ export class SystemController {
       reply,
       {
         status: 'ok',
-        service: 'botla-whatsapp-gateway',
+        service: 'whatsapp-gateway',
         version: '1.0.0',
         uptimeSeconds: Math.floor(process.uptime()),
         timestamp: new Date().toISOString(),
         publicBaseUrl: getPublicBaseUrl(),
         redis: isUsingMockRedis() ? 'in-memory-fallback' : 'connected-redis',
-        webhookUrl: config.botlaWebhookUrl,
+        webhookUrl: config.webhookUrl,
         webhookEnabled: config.webhookEnabled,
         activeSessions: sessionService.listSessions().length,
         protocolVersion: cachedVersion ? cachedVersion.version.join('.') : 'synced-on-demand',
@@ -174,7 +174,10 @@ export class SystemController {
     request: FastifyRequest,
     reply: FastifyReply
   ): Promise<FastifyReply> {
-    const signature = request.headers['x-botla-signature'];
+    const signature =
+      request.headers['x-gateway-signature-256'] ||
+      request.headers['x-hub-signature-256'] ||
+      request.headers['x-botla-signature'];
     logger.info({ signature, body: request.body }, '[MockWebhook] Received webhook payload');
     return ResponseUtil.success(
       reply,
