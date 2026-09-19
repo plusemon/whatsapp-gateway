@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { config, logger } from '../config.js';
+import { config } from '../config/env.js';
+import { logger } from './logger.js';
 import type { LogCleanupResult, MediaCleanupResult } from '../types/index.js';
 
 let cleanupIntervalTimer: NodeJS.Timeout | null = null;

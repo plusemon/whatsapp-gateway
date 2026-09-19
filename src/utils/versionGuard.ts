@@ -1,6 +1,6 @@
 import { fetchLatestBaileysVersion, WAVersion } from '@whiskeysockets/baileys';
 import type Redis from 'ioredis';
-import { logger } from '../config.js';
+import { logger } from './logger.js';
 
 export interface ProtocolVersionInfo {
   version: WAVersion;
